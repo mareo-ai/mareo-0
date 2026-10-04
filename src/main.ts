@@ -241,6 +241,8 @@ async function startMareo(): Promise<void> {
   await mainWindow.loadFile(path.join(app.getAppPath(), 'assets', 'startup.html'))
 
   while (mainWindow && !mainWindow.isDestroyed()) {
+    // The engine's own output; when a start fails this is the file to ask for.
+    const engineLog = path.join(app.getPath('userData'), 'logs', 'mareo.log')
     try {
       const runtimeDirectory = app.isPackaged
         ? process.resourcesPath
@@ -254,7 +256,7 @@ async function startMareo(): Promise<void> {
         nodeExecutable: path.join(runtimeDirectory, 'node-runtime', 'bin', process.platform === 'win32' ? 'node.exe' : 'node'),
         dshHome,
         workingDirectory: app.getPath('home'),
-        logFile: path.join(app.getPath('userData'), 'logs', 'mareo.log'),
+        logFile: engineLog,
         env: {
           // Model credentials come from the account, never from the user.
           DEEPSEEK_API_KEY: account.token,
@@ -284,10 +286,10 @@ async function startMareo(): Promise<void> {
       await telemetry.flush()
       const choice = await dialog.showMessageBox(mainWindow, {
         type: 'error',
-        title: 'Mareo could not start',
-        message: 'DeepSeek Harness failed to start.',
-        detail,
-        buttons: ['Retry', 'Quit'],
+        title: 'Mareo 无法启动',
+        message: '引擎启动失败。',
+        detail: `${detail}\n\n引擎日志：${engineLog}`,
+        buttons: ['重试', '退出'],
         defaultId: 0,
         cancelId: 1,
       })
@@ -677,15 +679,15 @@ function showUnexpectedExit(message: string, errorOutput = ''): void {
   void dialog
     .showMessageBox(mainWindow, {
       type: 'error',
-      title: 'Mareo stopped',
-      message,
-      detail: `The current log is stored at ${path.join(app.getPath('userData'), 'logs', 'mareo.log')}.`,
-      buttons: ['Quit'],
+      title: 'Mareo 已停止',
+      message: '引擎意外退出，需要重新启动。',
+      detail: `日志文件：${path.join(app.getPath('userData'), 'logs', 'mareo.log')}`,
+      buttons: ['退出'],
     })
     .then(() => app.quit())
 }
 
 function showFatalError(error: unknown): void {
-  dialog.showErrorBox('Mareo could not start', error instanceof Error ? error.message : String(error))
+  dialog.showErrorBox('Mareo 无法启动', error instanceof Error ? error.message : String(error))
   app.quit()
 }

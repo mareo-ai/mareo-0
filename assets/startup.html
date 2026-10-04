@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -41,8 +41,26 @@
         opacity: 0.72;
       }
 
+      /* Startup can take a while on a busy machine. Say so after a few seconds —
+         with CSS only, so the page keeps its script-free CSP. */
+      .slow {
+        opacity: 0;
+        animation: reveal 0.4s ease 8s forwards;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .slow {
+          opacity: 0.72;
+          animation: none;
+        }
+      }
+
       @keyframes spin {
         to { transform: rotate(360deg); }
+      }
+
+      @keyframes reveal {
+        to { opacity: 0.72; }
       }
     </style>
   </head>
@@ -50,7 +68,8 @@
     <main>
       <img src="logo-white.png" alt="Mareo" width="96" height="96" />
       <div class="spinner" aria-hidden="true"></div>
-      <p>Starting Mareo…</p>
+      <p>正在启动引擎…</p>
+      <p class="slow">首次启动或系统繁忙时可能要等一会儿，引擎会自动重试，请不要关闭窗口。</p>
     </main>
   </body>
 </html>

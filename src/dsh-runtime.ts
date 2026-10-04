@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { createWriteStream } from 'node:fs'
+import { createWriteStream, type WriteStream } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { get } from 'node:http'
 import path from 'node:path'
@@ -9,14 +9,29 @@ import { stripLocalPaths } from './telemetry.js'
 
 const execFileAsync = promisify(execFile)
 
-const STARTUP_TIMEOUT_MS = 30_000
+/**
+ * How long one attempt may take to report its address. Generous on purpose: a
+ * cold start on Windows — Defender scanning the runtime while the disk is busy —
+ * has been measured past 30 seconds, and the user is looking at a spinner, not
+ * at a broken window.
+ */
+const STARTUP_TIMEOUT_MS = 90_000
 const SHUTDOWN_TIMEOUT_MS = 5_000
+/** A missed startup budget is intermittent, so one silent retry is worth it. */
+const STARTUP_ATTEMPTS = 2
 
 export interface DshRuntime {
   url: string
   origin: string
   stop(): Promise<void>
 }
+
+/**
+ * The engine process stayed alive but never became usable inside its budget.
+ * Only this kind of failure is retried: a crash or a rejected launch would fail
+ * the same way again.
+ */
+class StartupTimeoutError extends Error {}
 
 interface StartDshRuntimeOptions {
   runtimeDirectory: string
@@ -26,6 +41,8 @@ interface StartDshRuntimeOptions {
   logFile: string
   /** Extra environment variables merged over the process environment. */
   env?: Record<string, string>
+  /** How long one startup attempt may take. Defaults to `STARTUP_TIMEOUT_MS`. */
+  startupTimeoutMs?: number
   /**
    * Called when DSH dies on its own. The second argument is the tail of its
    * stderr, already stripped of paths and tokens, for the crash report.
@@ -69,15 +86,50 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
     { insert: [{ id: 'mareo-brand', name: pathToFileURL(path.join(options.runtimeDirectory, 'node_modules', 'mareo-brand', 'index.js')).href }] },
   ]))
   await mkdir(path.dirname(options.logFile), { recursive: true })
-  const log = createWriteStream(options.logFile, { flags: 'w' })
+
+  const launch: DshLaunch = {
+    dshBinPath: path.join(dshPackageDirectory, packageJson.bin.dsh),
+    brandPatch,
+    startupTimeoutMs: options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS,
+    log: createWriteStream(options.logFile, { flags: 'w' }),
+  }
+
+  let lastError: unknown
+  for (let attempt = 1; attempt <= STARTUP_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      // The failed attempt closed its own stream, so reopen in append mode
+      // instead of throwing its evidence away.
+      launch.log = createWriteStream(options.logFile, { flags: 'a' })
+      launch.log.write(`\n--- no address after ${launch.startupTimeoutMs} ms, starting the engine again (attempt ${attempt}) ---\n`)
+    }
+    try {
+      return await launchDshProcess(options, launch)
+    } catch (error) {
+      lastError = error
+      if (!(error instanceof StartupTimeoutError)) throw error
+    }
+  }
+  throw lastError
+}
+
+interface DshLaunch {
+  dshBinPath: string
+  brandPatch: string
+  startupTimeoutMs: number
+  log: WriteStream
+}
+
+/** One engine process: spawn it, wait until its Web UI answers, hand it back. */
+async function launchDshProcess(options: StartDshRuntimeOptions, launch: DshLaunch): Promise<DshRuntime> {
+  const { log } = launch
   const child = spawn(
     options.nodeExecutable,
     [
       '--expose-internals',
-      path.join(dshPackageDirectory, packageJson.bin.dsh),
+      launch.dshBinPath,
       'web',
       '--patch',
-      brandPatch,
+      launch.brandPatch,
       '--host',
       '127.0.0.1',
       '--port',
@@ -134,8 +186,10 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
   })
 
   try {
-    const url = await waitForDshUrl(() => output, () => exitDescription)
-    await waitUntilReachable(url, () => exitDescription)
+    // The address is normally on stdout, but a late or redirected line must not
+    // cost a start: both streams are scanned, only stdout is logged as output.
+    const url = await waitForDshUrl(() => output + recentErrorOutput, () => exitDescription, launch.startupTimeoutMs)
+    await waitUntilReachable(url, () => exitDescription, launch.startupTimeoutMs)
     ready = true
 
     return {
@@ -163,15 +217,22 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
       new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)),
     ])
     const detail = recentErrorOutput.trim()
-    throw new Error(detail ? `${messageFrom(error)}\n\n${detail}` : messageFrom(error))
+    throw startFailure(error, detail)
   }
+}
+
+/** Keeps a startup timeout recognisable as retryable while attaching what the engine printed. */
+function startFailure(error: unknown, detail: string): Error {
+  const message = detail === '' ? messageFrom(error) : `${messageFrom(error)}\n\n${detail}`
+  return error instanceof StartupTimeoutError ? new StartupTimeoutError(message) : new Error(message)
 }
 
 async function waitForDshUrl(
   currentOutput: () => string,
   currentExit: () => string | undefined,
+  timeoutMs: number,
 ): Promise<string> {
-  const deadline = Date.now() + STARTUP_TIMEOUT_MS
+  const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
     const url = extractDshUrl(currentOutput())
@@ -183,11 +244,11 @@ async function waitForDshUrl(
     await delay(100)
   }
 
-  throw new Error('Timed out waiting for DeepSeek Harness to report its local address.')
+  throw new StartupTimeoutError('Timed out waiting for DeepSeek Harness to report its local address.')
 }
 
-async function waitUntilReachable(url: string, currentExit: () => string | undefined): Promise<void> {
-  const deadline = Date.now() + STARTUP_TIMEOUT_MS
+async function waitUntilReachable(url: string, currentExit: () => string | undefined, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
     const exitDescription = currentExit()
@@ -199,7 +260,7 @@ async function waitUntilReachable(url: string, currentExit: () => string | undef
     await delay(150)
   }
 
-  throw new Error('Timed out waiting for the DeepSeek Harness Web UI.')
+  throw new StartupTimeoutError('Timed out waiting for the DeepSeek Harness Web UI.')
 }
 
 function probeLocalUrl(url: string): Promise<boolean> {
