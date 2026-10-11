@@ -148,3 +148,12 @@ Default flow:
 ```text
 main → task branch → develop → test → commit → PR → STOP
 ```
+
+## Before you start: read `docs/agents-landing.md`
+
+This repository may have more than one agent working in it at the same time. Read
+[`docs/agents-landing.md`](docs/agents-landing.md) first: it holds the project map,
+the DSH seams, how to run and verify (including the gateway's own test suite), the
+production operating rules and who may write where, the current state snapshot, and
+the known issues. It also lists the file surfaces each workstream owns, so you do not
+edit a file another agent is holding.
