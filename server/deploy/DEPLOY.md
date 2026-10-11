@@ -43,7 +43,7 @@ sudo systemctl enable --now docker
 把仓库的 `server/` 目录放到服务器（任选）：
 
 ```sh
-git clone git@github.com:ZheFeng/mareo-0.git /srv/mareo   # 或 scp 仅 server/
+git clone git@github.com:mareo-ai/mareo-0.git /srv/mareo   # 或 scp 仅 server/
 cd /srv/mareo/server/deploy
 cp .env.example .env
 chmod 600 .env
