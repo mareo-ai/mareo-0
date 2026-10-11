@@ -124,6 +124,9 @@ test('starts from an address the engine announces on stderr', async () => {
     started = await startDshRuntime({ ...runtime.options, onUnexpectedExit: () => {} })
     assert.match(started.url, /^http:\/\/127\.0\.0\.1:\d+\/\?token=stderr-secret$/)
     assert.equal(started.origin, new URL(started.url).origin)
+    const patch = JSON.parse(readFileSync(path.join(runtime.options.dshHome, 'mareo-brand.patch.json'), 'utf8')) as { id?: string; disabled?: boolean }[]
+    assert.ok(patch.some((entry) => entry.id === 'ui-settings-models' && entry.disabled === true))
+    assert.ok(!patch.some((entry) => entry.id === 'ui-model-selection' && entry.disabled === true))
   } finally {
     await started?.stop()
     runtime.cleanup()

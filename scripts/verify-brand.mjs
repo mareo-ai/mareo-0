@@ -22,8 +22,11 @@ try {
   const html = await page.text()
   assert(html.includes('mareo-brand'), 'Mareo plugin missing from boot graph')
   assert(!html.includes('dsh-client-ui-brand-official'), 'Official brand still active')
+  assert(!html.includes('dsh-client-ui-settings-models'), 'Provider settings still active')
+  assert(html.includes('dsh-client-ui-model-selection'), 'Chat model selection missing from boot graph')
   const patch = JSON.parse(await readFile(path.join(home, 'mareo-brand.patch.json'), 'utf8'))
   assert.equal(patch[0].disabled, true)
+  assert(patch.some(entry => entry.id === 'ui-settings-models' && entry.disabled === true))
   console.log('Verified official plugin composition and authenticated Web boot.')
   if (process.argv.includes('--serve')) {
     console.log(JSON.stringify({ pid: process.pid, home, url: runtime.url }))

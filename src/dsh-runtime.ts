@@ -83,6 +83,8 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
   const brandPatch = path.join(options.dshHome, 'mareo-brand.patch.json')
   await writeFile(brandPatch, JSON.stringify([
     { id: 'ui-brand-official', disabled: true },
+    // Mareo owns provider credentials; keep the separate chat model picker.
+    { id: 'ui-settings-models', disabled: true },
     { insert: [{ id: 'mareo-brand', name: pathToFileURL(path.join(options.runtimeDirectory, 'node_modules', 'mareo-brand', 'index.js')).href }] },
   ]))
   await mkdir(path.dirname(options.logFile), { recursive: true })

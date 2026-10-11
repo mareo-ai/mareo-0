@@ -64,6 +64,8 @@ The desktop brand is `Mareo`, with bundle ID `app.mareo.desktop`. The applicatio
 
 The brand presentation uses `sidebar.brand.mark`, `sidebar.brand.name`, `conversation.hero.brand.mark`, and `shell.overlay`. The sidebar shows the Mareo logo and a single-line `Mareo` name; `Built on DeepSeek Harness` remains at the bottom right, outside the primary brand area. The default hero headline and Preview badge are retained. There is no DOM rewriting, global CSS override, source patch, or fork. Attribution follows the [official brand guidelines](https://github.com/deepseek-ai/deepseek-harness/blob/master/BRAND_GUIDELINES.md).
 
+The same launcher overlay disables `ui-settings-models`, removing the Models settings page (API keys, endpoint URLs, and provider management) and its bundled welcome and API-key onboarding dialogs. The independent `ui-model-selection` plugin remains enabled for model selection in chat. This hides configuration entry points; it does not remove existing user configuration or restrict the model catalog to gateway-supported models.
+
 Run `npm run verify:brand` after staging, or `node scripts/verify-brand.mjs "out/Mareo-darwin-arm64/Mareo.app/Contents/Resources"` after packaging. This boots an isolated temporary DSH home and checks authenticated loading and brand composition without an API key. Add `--serve` after the resources path to keep the test instance available for visual checks. When upgrading DSH, also verify sidebar folding, both themes, and attribution placement in the UI.
 
 ## Model access and account
