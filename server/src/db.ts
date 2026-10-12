@@ -299,6 +299,10 @@ function migrate(db: GatewayDatabase): void {
     db.exec('DROP TABLE users_legacy')
     db.exec('DROP TABLE tokens_legacy')
     db.exec('DROP TABLE usage_legacy')
+    // v9, as in the upgrade path above: the ledger replaces the reward grants,
+    // and the per-account daily allowance override is gone.
+    db.exec('DROP TABLE IF EXISTS reward_grants')
+    db.prepare("DELETE FROM settings WHERE key = 'quota.accountAllowances'").run()
     db.exec('COMMIT')
     db.exec('PRAGMA foreign_keys = ON')
   } catch (error) {
