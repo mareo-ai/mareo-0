@@ -99,10 +99,10 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 | 项 | 值 |
 |---|---|
 | 已发布版本 | **0.1.9**（2026-10-13 上线，含 Windows 启动修复与安装包签名） |
-| main 上**未发布**的内容 | Credit Wallet（`docs/money/designs/2026-10-12-credit-wallet.md`）：schema v9、两桶额度、钱包账本、报表「钱包与毛利」、客户端两行额度条——**服务端尚未部署，客户端尚未发版** |
-| 线上额度配置 | `quota.mode=enforce`、默认 **¥10/天**；账号覆盖 `1305d9ac…=¥100`、`f9086e44…=¥200` **将在 v9 迁移时被删除**（两个账号都回到 ¥10/天，差额改为钱包入账） |
+| main 上**未发布**的内容 | Credit Wallet 的**客户端部分**（`brand/client.cjs` 两行额度条 + `src/quota.ts`）；服务端已于 2026-10-13 02:05 上线（schema v9、`enforce`），设计与上线记录见 `docs/money/designs/2026-10-12-credit-wallet.md` |
+| 线上额度配置 | `quota.mode=enforce`、默认 **¥10/天**；`quota.accountAllowances` 已随 v9 迁移删除（`1305d9ac`、`f9086e44` 都回到 ¥10/天）。要给某账号放宽额度就给它入账 Wallet（`credit-cli`） |
 | 线上请求闸门 | `DAILY_LIMIT=0`（已关闭请求次数上限）、`DAILY_WARN_LIMIT=500` |
-| 数据库 | 线上 schema **8**（约 44 个账号）；v9 迁移已在代码里，**待部署** |
+| 数据库 | 线上 schema **9**（45 个账号，约 6.7 万行 usage）；迁移前的备份 `deploy/backups/mareo-20261013-020427.db`，旧代码 `deploy/src.bak-20261013-020426` |
 | 运行时钉版 | `@deepseek-ai/dsh 0.1.5-rc.2` |
 
 ### 已知问题（按影响排序）
