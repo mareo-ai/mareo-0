@@ -7,8 +7,8 @@ name: Release
 #   Apple (macOS signing + notarization)
 #     MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, APPLE_ID,
 #     APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
-#   Windows signing (optional)
-#     WINDOWS_CERT_BASE64, WINDOWS_CERT_PASSWORD
+#   Windows signing (required: the build fails rather than publish unsigned)
+#     SSLTRUS_ACCESS_KEY, SSLTRUS_ACCESS_SECRET, SSLTRUS_CERT_CODE
 #   Distribution (optional; without it artifacts stay on ECS/GitHub Release)
 #     OSS_REGION, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET
 #     ECS_HOST, ECS_SSH_KEY  (key = private key contents, to update the manifest)
@@ -108,6 +108,10 @@ jobs:
           SSLTRUS_CERT_CODE: ${{ secrets.SSLTRUS_CERT_CODE }}
         run: ./scripts/install-signing-cli.ps1
       - run: npm run make:win
+        env:
+          ACCESS_KEY: ${{ secrets.SSLTRUS_ACCESS_KEY }}
+          ACCESS_SECRET: ${{ secrets.SSLTRUS_ACCESS_SECRET }}
+          SSLTRUS_CERT_CODE: ${{ secrets.SSLTRUS_CERT_CODE }}
       - name: Verify the signatures
         shell: pwsh
         run: ./scripts/verify-windows-signatures.ps1

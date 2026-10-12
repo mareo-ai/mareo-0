@@ -15,14 +15,15 @@ Windows 产物是 **Squirrel 安装包**（`MareoSetup.exe`）。Squirrel 不能
    ```
 4. 更新官网 `website/app.js` 的 `downloads.windows` 为 `downloads/MareoSetup.exe`，rsync `index.html`/`app.js` 上线
 
-**启用签名**（可选，随时加）：仓库 → Settings → Secrets and variables → Actions，添加两个 secret：
+**启用签名**（必需）：仓库 → Settings → Secrets and variables → Actions，添加三个 secret：
 
 | Secret | 值 |
 |---|---|
-| `WINDOWS_CERT_BASE64` | `.pfx` 证书文件的 base64（`base64 -i mareo.pfx \| pbcopy`） |
-| `WINDOWS_CERT_PASSWORD` | `.pfx` 密码 |
+| `SSLTRUS_ACCESS_KEY` | 锐安信远程代码签名**订阅密钥**的 Access Key（控制台 → 代码签名证书 → 详情 → 安全） |
+| `SSLTRUS_ACCESS_SECRET` | 同一个订阅的 Access Secret |
+| `SSLTRUS_CERT_CODE` | 证书编号（`signtool quota --json` 的输出里能看到） |
 
-加完后 workflow 自动产出签名安装包，无需改代码。
+签名走厂商云端 HSM，**没有 pfx、也不需要私钥文件**；细节见 [`signing.md`](signing.md) 的"Windows 云签名"一节。缺这三个 secret 时构建会**直接失败**，不会产出未签名安装包。
 
 ## 方式 B：本地 Windows 机器
 
@@ -31,7 +32,7 @@ Windows 产物是 **Squirrel 安装包**（`MareoSetup.exe`）。Squirrel 不能
 - Windows 10/11 x64
 - Node.js 22+ 与 npm（`node --version` 可用即可）
 - Git
-- 代码签名证书（`.pfx`）——没有证书也能构建，但安装包未签名，用户会遇到 SmartScreen 警告
+- 锐安信远程代码签名凭据（`ACCESS_KEY`/`ACCESS_SECRET`/`SSLTRUS_CERT_CODE`）——没有凭据也能构建，但安装包未签名，用户会遇到 SmartScreen 警告（**发布流程不允许未签名**，CI 会拦）
 
 ## 一、代码与依赖
 
@@ -51,16 +52,18 @@ npm run check:node:win
 
 这一步校验 `runtime/package.json` 里钉死的 Node 版本与 SHA-256，并确认解压后 `bin\node.exe` 存在。
 
-## 三、签名环境变量（可选，但正式发布必做）
+## 三、签名环境变量（正式发布必做）
 
 ```powershell
-$env:WINDOWS_CERT_FILE = "C:\certs\mareo.pfx"    # 安装包签名
-$env:WINDOWS_CERT_PASSWORD = "<pfx 密码>"
-$env:CSC_LINK = "C:\certs\mareo.pfx"             # 应用 exe 签名（等价路径）
-$env:CSC_KEY_PASSWORD = "<pfx 密码>"
+# 从 sslTrus 客户端发布页装好 CLI（或直接用 CI 的安装脚本），然后：
+$env:SSLTRUS_SIGNTOOL = "C:\tools\ssltrus\signtool.exe"   # 显式路径，避免和微软自带 signtool 撞名
+$env:ACCESS_KEY = "<订阅 Access Key>"
+$env:ACCESS_SECRET = "<订阅 Access Secret>"
+$env:SSLTRUS_CERT_CODE = "<证书编号>"
 ```
 
-> 未设置这些变量时仍会构建，只是产物未签名。
+> 未设置这些变量时仍会构建，只是产物未签名（构建日志会打一行 warning）；**发布流程不允许未签名**，CI 会先失败。
+> 签名只覆盖 `Mareo.exe` 与 `MareoSetup.exe`，其余文件保留厂商自带签名——原因见 [`signing.md`](signing.md)。
 
 ## 四、构建
 

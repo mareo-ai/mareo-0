@@ -41,6 +41,10 @@ jobs:
         run: ./scripts/install-signing-cli.ps1
 
       - name: Build installer
+        env:
+          ACCESS_KEY: ${{ secrets.SSLTRUS_ACCESS_KEY }}
+          ACCESS_SECRET: ${{ secrets.SSLTRUS_ACCESS_SECRET }}
+          SSLTRUS_CERT_CODE: ${{ secrets.SSLTRUS_CERT_CODE }}
         run: npm run make:win
 
       - name: Verify the signatures

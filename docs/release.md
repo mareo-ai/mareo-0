@@ -71,7 +71,7 @@ RELEASES                             # （Phase 2）Squirrel 更新索引
 |---|---|
 | macOS 签名 | `MACOS_CERT_P12_BASE64`、`MACOS_CERT_PASSWORD` |
 | macOS 公证 | `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID` |
-| Windows 签名（可选） | `WINDOWS_CERT_BASE64`、`WINDOWS_CERT_PASSWORD` |
+| Windows 签名（必需） | `SSLTRUS_ACCESS_KEY`、`SSLTRUS_ACCESS_SECRET`、`SSLTRUS_CERT_CODE`（云签名，见 [`signing.md`](signing.md)） |
 | OSS 上传 | `OSS_REGION`、`OSS_BUCKET`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` |
 | 官网部署与清单更新（可选） | `ECS_HOST`（如 `root@114.55.15.112`）、`ECS_SSH_KEY`（部署私钥内容） |
 

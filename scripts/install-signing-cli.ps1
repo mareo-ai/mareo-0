@@ -5,7 +5,7 @@
 $ErrorActionPreference = 'Stop'
 
 foreach ($name in 'ACCESS_KEY', 'ACCESS_SECRET', 'SSLTRUS_CERT_CODE') {
-  if (-not (Get-Item "env:$name" -ErrorAction SilentlyContinue).Value) {
+  if ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) {
     throw "$name is not configured; code signing is required for a release build"
   }
 }
@@ -25,11 +25,9 @@ $exe = (Get-ChildItem $directory -Filter 'signtool*.exe' -Recurse | Select-Objec
 if (-not $exe) { throw 'the signing CLI executable is missing after extraction' }
 
 # The hook reads these; the CLI shares the name of Microsoft's signtool, so the
-# path is explicit rather than resolved through PATH.
+# path is explicit rather than resolved through PATH. The credentials stay in the
+# workflow's `env:` blocks instead of being written to a file on the runner.
 Add-Content $env:GITHUB_ENV "SSLTRUS_SIGNTOOL=$exe"
-Add-Content $env:GITHUB_ENV "ACCESS_KEY=$env:ACCESS_KEY"
-Add-Content $env:GITHUB_ENV "ACCESS_SECRET=$env:ACCESS_SECRET"
-Add-Content $env:GITHUB_ENV "SSLTRUS_CERT_CODE=$env:SSLTRUS_CERT_CODE"
 
 Write-Host "signing CLI $($entry.version) installed at $exe"
 & $exe quota --json
