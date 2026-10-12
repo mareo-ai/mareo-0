@@ -16,12 +16,12 @@ Mareo 是 **DeepSeek Harness（DSH）的桌面薄壳**：DSH 始终是第三方�
 | `brand/` | 注入 DSH 的品牌插件（宿主半 + 客户端半） | `client.cjs`（侧边栏额度条 `sidebar.footer.action`、赞助位） |
 | `assets/` | 启动页 / 登录页 / preload | `startup.html`、`signin.html`、`account-bridge-preload.js` |
 | `runtime/` | DSH 运行时依赖**钉版** | `package.json`（`@deepseek-ai/dsh: 0.1.5-rc.2`）、`package-lock.json` |
-| `server/` | 自建网关：零框架 Node + TS + `node:sqlite` | `src/server.ts`（路由）、`proxy.ts`（转发 + 用量解析）、`quota.ts`、`rewards.ts`（奖励账本）、`pricing.ts`（唯一算钱入口）、`cost-report.ts`、`settings.ts`、`db.ts`（schema） |
+| `server/` | 自建网关：零框架 Node + TS + `node:sqlite` | `src/server.ts`（路由）、`proxy.ts`（转发 + 用量解析）、`quota.ts`（免费额度 + 钱包两桶）、`wallet.ts`（唯一入账/扣减入口，见 `docs/money/standard.md`）、`rewards.ts`（奖励任务）、`pricing.ts`（唯一算钱入口）、`cost-report.ts`（含「钱包与毛利」分节）、`settings.ts`、`db.ts`（schema） |
 | `website/` | 官网（纯静态） | `index.html`、`app.js`、`privacy*.html` |
 | `docs/` | 运维/发布/合规文档 | `operations.md`（最常查）、`release.md`、`signing.md`、`metrics.md`、`updates.md`、`privacy.md` |
 | `docs/money/` | **一切与钱有关的口径与设计文档**（唯一去处） | `standard.md`（权威口径）、`designs/<日期>-<slug>.md`（每次改动一份，先于代码） |
 | `scripts/` | 构建、发布、站点、OSS 脚本 | `stage-runtime.mjs`、`release.mjs`、`publish-oss.mjs`、`deploy-site.mjs`、`sign-macos.mjs` |
-| `tests/` / `server/test/` | 客户端 82 个 / 服务端 76 个测试 | 全部 `node:test`，无 mock 框架 |
+| `tests/` / `server/test/` | 客户端 84 个 / 服务端 84 个测试 | 全部 `node:test`，无 mock 框架 |
 
 ### DSH 的几个"缝"（改客户端前必须知道）
 
@@ -98,25 +98,25 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 
 | 项 | 值 |
 |---|---|
-| 已发布版本 | **0.1.8**（2026-09-23 上线）；更新清单里 `notes` 还是 `Merge branch 'fix/oss-multipart-upload'`，待修 |
-| main 上**未发布**的内容 | Windows 启动超时修复（90s 预算 + 自动重试一次 + 从 stderr 找地址 + 启动页"正在启动引擎…"）→ 下次发版为 **0.1.9** |
-| 线上额度配置 | `quota.mode=enforce`、默认 **¥10/天**、账号覆盖 `1305d9ac…=¥100`、`f9086e44…=¥200` |
+| 已发布版本 | **0.1.9**（2026-10-13 上线，含 Windows 启动修复与安装包签名） |
+| main 上**未发布**的内容 | Credit Wallet（`docs/money/designs/2026-10-12-credit-wallet.md`）：schema v9、两桶额度、钱包账本、报表「钱包与毛利」、客户端两行额度条——**服务端尚未部署，客户端尚未发版** |
+| 线上额度配置 | `quota.mode=enforce`、默认 **¥10/天**；账号覆盖 `1305d9ac…=¥100`、`f9086e44…=¥200` **将在 v9 迁移时被删除**（两个账号都回到 ¥10/天，差额改为钱包入账） |
 | 线上请求闸门 | `DAILY_LIMIT=0`（已关闭请求次数上限）、`DAILY_WARN_LIMIT=500` |
-| 数据库 | schema **8**，约 44 个账号；容器 `Up (healthy)` |
+| 数据库 | 线上 schema **8**（约 44 个账号）；v9 迁移已在代码里，**待部署** |
 | 运行时钉版 | `@deepseek-ai/dsh 0.1.5-rc.2` |
 
 ### 已知问题（按影响排序）
 
 1. **DeepSeek 余额中断**：历史上发生 4 次 `status=402`（09-14、09-15、09-20、09-28），最近一次让全部用户 15:13–21:12 请求失败。建议做余额告警。
-2. **Windows 启动超时**：`Timed out waiting for DeepSeek Harness to report its local address.` 累计 30 次，**100% 在 Windows**；近 10 天 35 次启动里 9 次失败（26%），有账号因此再没回来。修复已在 main，**待发版**。
-3. **安装包未签名**：Windows 会弹 SmartScreen；正在采购**锐成（sslTrus）云签名**（先 7 天免费试用验证 CI，再买 ¥500/年 / 1000 次）。接完要改 `forge.config.cjs`：pfx 路径换成 `windowsSign` 钩子 + maker-squirrel 的 `windowsSign`。
-4. **免费额度卡住最活跃用户**：¥10/天硬顶被重度用户反复撞到（单日上百次 429），是最黏用户的主要摩擦点。
+2. **Windows 启动超时**：修复已随 **0.1.9** 发出（90s 预算 + 自动重试一次 + 从 stderr 找地址）；仍要盯发版后 24 小时的启动失败率与版本分布，确认脱离之前的 26%。
+3. **Windows 签名覆盖有限**：**0.1.9 起 `Mareo.exe` 与 `MareoSetup.exe` 已签名**（锐安信云签名，2 次/构建，额度 1000 次/年）；Electron DLL 与 DSH 原生模块仍未签（不影响安装，`pty.node` 曾报 `UnknownError`）。SmartScreen 信誉仍需时间积累。
+4. **免费额度卡住最活跃用户**：¥10/天硬顶被重度用户反复撞到（单日上百次 429），是最黏用户的主要摩擦点。Credit Wallet 就是为此准备的下一步（钱包可入账、可透支最后一笔）。
 5. **更新推不动**：仍有用户停留在 0.1.4（不带 session 头）。
 
 ### 进行中的事
 
-- 云签名接入（见上，等试用凭据）。
-- 下一步产品方向已定：**当前阶段优先拉新**（高于收钱），但"可承受的成本结构"是拉新前提；集中做的一件事是 **Windows 首发体验**（签名 + 启动修复发版），随后是**邀请送额度**（复用服务端已有奖励账本，只差 UI）。
+- **Credit Wallet 上线**：代码已在 main 未发版——先部署服务端 v9 迁移 + 灰度（`shadow` → 内部 `enforce` → 全量），再发客户端（额度条改两行）。设计文档见 `docs/money/designs/2026-10-12-credit-wallet.md`。
+- 下一步产品方向已定：**当前阶段优先拉新**（高于收钱），"可承受的成本结构"是拉新前提；Wallet 之后是**邀请送额度**（`grantCredit` 已就位，只差入口）。
 
 ---
 
