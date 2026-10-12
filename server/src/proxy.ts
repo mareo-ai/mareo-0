@@ -38,12 +38,28 @@ export function isTitleRequest(body: Buffer): boolean {
   if (body.length === 0 || body.length > TITLE_MAX_BODY_BYTES) return false
   try {
     const parsed = JSON.parse(body.toString('utf8')) as { messages?: { content?: unknown }[] }
-    return (parsed.messages ?? []).some(
-      (message) => typeof message.content === 'string' && TITLE_INSTRUCTION.test(message.content.trimStart()),
-    )
+    return (parsed.messages ?? []).some((message) => {
+      const text = messageText(message.content)
+      return text !== undefined && TITLE_INSTRUCTION.test(text.trimStart())
+    })
   } catch {
     return false
   }
+}
+
+/**
+ * The text of one message. The OpenAI-shaped endpoint puts a string here; the
+ * Messages endpoint this harness also speaks puts a list of content blocks, so
+ * a title call would otherwise look like an ordinary chat turn.
+ */
+function messageText(content: unknown): string | undefined {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return undefined
+  const texts = content
+    .filter((block): block is { type?: unknown; text?: unknown } => typeof block === 'object' && block !== null)
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text as string)
+  return texts.length > 0 ? texts.join('') : undefined
 }
 
 /**
@@ -82,11 +98,17 @@ export function textFromResponseTail(text: string): string | undefined {
     try {
       const json = JSON.parse(payload) as {
         choices?: { delta?: { content?: unknown }; message?: { content?: unknown } }[]
+        delta?: { text?: unknown }
+        content?: unknown
       }
       for (const choice of json.choices ?? []) {
         push(choice.delta?.content)
         push(choice.message?.content)
       }
+      // The Messages endpoint streams `content_block_delta` frames carrying
+      // `delta.text`, and answers in one body whose blocks carry `text`.
+      push(json.delta?.text)
+      push(messageText(json.content))
     } catch {
       // A frame we cannot parse is simply not part of the title.
     }
