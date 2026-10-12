@@ -78,15 +78,19 @@ node24 --expose-internals <dsh020>/lib/bin.js web \
 | 面 | 为什么必须关 | 建议在 patch 里禁用 |
 |---|---|---|
 | DeepSeek 账号 / 凭据 | 用户可以登录自己的 DeepSeek 账号并选到走账号的模型，**绕过 Mareo 网关：不计费、不限额度**。它不是覆盖我们注入的 env 凭据，而是新增的独立 provider（`PROVIDER = "deepseek-account"`，未登录时报 `ACCOUNT_SIGN_IN_REQUIRED`） | `deepseek-account`、`llm-deepseek-account`、`ui-settings-account` |
-| 插件管理器 + 配置编辑器 | 用户可装插件、改配置：我们的计费链路、品牌界面、额度条都变成用户可改的东西，支持面失控 | `plugin-manager`、`tool-plugin-manager`、`ui-plugin-manager`、`config-editor` |
+| 插件管理器 | 用户可装插件：我们的计费链路、品牌界面、额度条都变成用户可改的东西，支持面失控 | `plugin-manager`、`tool-plugin-manager`、`ui-plugin-manager` |
 | 搜索端点设置页 | 用户能把联网搜索指向别处，这部分调用跑出账本（现在搜索经网关计费） | `ui-settings-web-search` |
+
+> ⚠️ **不要禁用 `config-editor`**（初版方案写错了，真机烟测才发现）：它的名字像"给用户改配置的编辑器"，实际是**设置服务的地基**——`dsh-settings` 的 `inject = ["configEditor", "profileContext"]`，设置值就是经它持久化的。禁掉它会让 `settings` 服务永远 pending，**连我们自己的 Account 设置区（以及将来的充值界面）一起挂掉**。烟测日志里那句 `settings … pending (waiting for service: configEditor)` 就是它。
+>
+> 另外：禁掉 `deepseek-account` 之后，日志会出现一条 `account-controller … pending (waiting for service: deepseekAccount)`——这是**预期内**的（那是我们不想要的账号 API），不是故障。
 
 保留（对我们有利、且不碰计费）：`ui-sidebar-browser`、`ui-sidebar-terminal`、`office-to-pdf`、`mcp-resources`、`ui-shortcuts`、各 `ui-settings-*`（agent-loop / session-log / shell / subagent）、preset 体系、实验性的语音输入与 Agent Team。
 **不要动** `authorization`：审批/权限流程要用它。
 
 天然对我们关闭（不必处理）：`desktop-product-telemetry` 与 `product-analytics` 的启用条件是 `profileContext?.name === 'desktop'`，而我们跑的是 `web` profile。
 
-落地后要断言：`--dump-config` 里上面每个 id 都是 `disabled: true`，且模型列表里不再出现走账号的模型。
+落地后要断言：`--dump-config` 里上面每个 id 都是 `disabled: true`，`config-editor` **没有**被禁用，且模型列表里不再出现走账号的模型。
 
 ## 6. 升级步骤与验收
 
