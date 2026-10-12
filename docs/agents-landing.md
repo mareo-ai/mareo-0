@@ -103,7 +103,7 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 | 线上额度配置 | `quota.mode=enforce`、默认 **¥10/天**；`quota.accountAllowances` 已随 v9 迁移删除（`1305d9ac`、`f9086e44` 都回到 ¥10/天）。要给某账号放宽额度就给它入账 Wallet（`credit-cli`） |
 | 线上请求闸门 | `DAILY_LIMIT=0`（已关闭请求次数上限）、`DAILY_WARN_LIMIT=500` |
 | 数据库 | 线上 schema **9**（45 个账号，约 6.7 万行 usage）；迁移前的备份 `deploy/backups/mareo-20261013-020427.db`，旧代码 `deploy/src.bak-20261013-020426` |
-| 运行时钉版 | `@deepseek-ai/dsh 0.2.0-rc.2`（已升级到 main，**待客户端发版**；线上 0.1.9 里带的仍是 `0.1.5-rc.2`）。升级前提与验收见 `docs/dsh-upgrade.md` |
+| 运行时钉版 | `@deepseek-ai/dsh 0.2.0-rc.2`（在分支 `feat/dsh-0.2.0` / PR #5，**未合并、未发版**；线上 0.1.9 里带的仍是 `0.1.5-rc.2`）。前提、改动与全部验证见 `docs/dsh-upgrade.md` |
 
 ### 已知问题（按影响排序）
 
@@ -116,7 +116,8 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 ### 进行中的事
 
 - **Credit Wallet 上线**：服务端已在 2026-10-13 02:05 上线（v9、`enforce`，见状态快照）；**客户端两行额度条还没发版**。设计文档见 `docs/money/designs/2026-10-12-credit-wallet.md`。
-- **DSH 升级（0.1.5-rc.2 → 0.2.0-rc.2）**：调研已完成，接缝实测可用，但有 3 个面（DeepSeek 账号、插件管理器/配置编辑器、搜索端点设置页）必须先在 patch 里关掉。**等 Credit Wallet 客户端发版后执行**，前提与验收见 [`docs/dsh-upgrade.md`](dsh-upgrade.md)。
+- **DSH 升级（0.1.5-rc.2 → 0.2.0-rc.2）**：一个 PR（#5，分支 `feat/dsh-0.2.0`）= 网关 + 客户端 + 方案文档。**网关部分已上线**（接受 `x-api-key`、按内容判别搜索、Messages 形态的标题解析）；客户端待发版，发版前还差 Windows 真机烟测。前提、改动与验证见 [`docs/dsh-upgrade.md`](dsh-upgrade.md)。
+- **充值（微信/支付宝）**：设计文档在 PR #4（分支 `docs/recharge-design`），待评审；商户号与支付宝企业应用还在申请，代码可先用模拟 provider 跑通。
 - 下一步产品方向已定：**当前阶段优先拉新**（高于收钱），"可承受的成本结构"是拉新前提；Wallet 之后是**邀请送额度**（`grantCredit` 已就位，只差入口）。
 
 ---
