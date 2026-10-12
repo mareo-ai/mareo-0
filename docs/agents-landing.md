@@ -18,7 +18,7 @@ Mareo 是 **DeepSeek Harness（DSH）的桌面薄壳**：DSH 始终是第三方�
 | `runtime/` | DSH 运行时依赖**钉版** | `package.json`（`@deepseek-ai/dsh: 0.1.5-rc.2`）、`package-lock.json` |
 | `server/` | 自建网关：零框架 Node + TS + `node:sqlite` | `src/server.ts`（路由）、`proxy.ts`（转发 + 用量解析）、`quota.ts`（免费额度 + 钱包两桶）、`wallet.ts`（唯一入账/扣减入口，见 `docs/money/standard.md`）、`rewards.ts`（奖励任务）、`pricing.ts`（唯一算钱入口）、`cost-report.ts`（含「钱包与毛利」分节）、`settings.ts`、`db.ts`（schema） |
 | `website/` | 官网（纯静态） | `index.html`、`app.js`、`privacy*.html` |
-| `docs/` | 运维/发布/合规文档 | `operations.md`（最常查）、`release.md`、`signing.md`、`metrics.md`、`updates.md`、`privacy.md` |
+| `docs/` | 运维/发布/合规文档 | `operations.md`（最常查）、`release.md`、`signing.md`、`metrics.md`、`updates.md`、`privacy.md`、`dsh-upgrade.md`（DSH 升级评估与计划） |
 | `docs/money/` | **一切与钱有关的口径与设计文档**（唯一去处） | `standard.md`（权威口径）、`designs/<日期>-<slug>.md`（每次改动一份，先于代码） |
 | `scripts/` | 构建、发布、站点、OSS 脚本 | `stage-runtime.mjs`、`release.mjs`、`publish-oss.mjs`、`deploy-site.mjs`、`sign-macos.mjs` |
 | `tests/` / `server/test/` | 客户端 84 个 / 服务端 84 个测试 | 全部 `node:test`，无 mock 框架 |
@@ -115,7 +115,8 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 
 ### 进行中的事
 
-- **Credit Wallet 上线**：代码已在 main 未发版——先部署服务端 v9 迁移 + 灰度（`shadow` → 内部 `enforce` → 全量），再发客户端（额度条改两行）。设计文档见 `docs/money/designs/2026-10-12-credit-wallet.md`。
+- **Credit Wallet 上线**：服务端已在 2026-10-13 02:05 上线（v9、`enforce`，见状态快照）；**客户端两行额度条还没发版**。设计文档见 `docs/money/designs/2026-10-12-credit-wallet.md`。
+- **DSH 升级（0.1.5-rc.2 → 0.2.0-rc.2）**：调研已完成，接缝实测可用，但有 3 个面（DeepSeek 账号、插件管理器/配置编辑器、搜索端点设置页）必须先在 patch 里关掉。**等 Credit Wallet 客户端发版后执行**，前提与验收见 [`docs/dsh-upgrade.md`](dsh-upgrade.md)。
 - 下一步产品方向已定：**当前阶段优先拉新**（高于收钱），"可承受的成本结构"是拉新前提；Wallet 之后是**邀请送额度**（`grantCredit` 已就位，只差入口）。
 
 ---
