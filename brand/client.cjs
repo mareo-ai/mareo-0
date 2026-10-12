@@ -230,18 +230,24 @@ function AccountSection() {
   )
 }
 
-// The daily quota, as a percentage. The user sees how much of today is used and
-// when it comes back; amounts never appear here, because the gateway sends a
-// percentage and the client has no price list.
+// The quota, in money. Two buckets: today's free allowance, which refills at
+// 00:00 Beijing, and the Mareo Wallet behind it, which does not expire. The
+// gateway sends both as micro-yuan, so the client renders amounts and never
+// sees a token count, a model price or the settlement rate.
 //
-// Running out is a plain wait-until-tomorrow state. Earning extra quota exists
-// in the gateway as a mechanism, but it has no user-facing entry until a real
-// provider is connected — an internal test task is not something to show users.
+// Running out is a plain notice with no purchase entry: the wallet is topped up
+// through the account surface, not from here.
 const meterTrackStyle = {
   height: 6, borderRadius: 3, overflow: 'hidden',
   background: 'var(--dsw-alias-border-l3, #e4e7ec)',
 }
 const meterFillStyle = { height: '100%', background: 'var(--dsw-alias-accent, #3d6bfe)', borderRadius: 3 }
+
+/** Micro-yuan as the user reads it: two decimals, and a minus in front of a debt. */
+function yuan(micro) {
+  const value = Math.abs(micro) / 1e6
+  return (micro < 0 ? '-¥' : '¥') + value.toFixed(2)
+}
 
 function QuotaMeter({ wide }) {
   const [snapshot, setSnapshot] = React.useState(null)
@@ -269,7 +275,11 @@ function QuotaMeter({ wide }) {
 
   if (!wide || !snapshot || snapshot.quota.visible !== true) return null
   const meter = snapshot.quota
+  const free = snapshot.free
   const exhausted = meter.exhausted === true
+  const freeUsedPercent = free.limitMicro > 0
+    ? Math.min(100, Math.round((free.usedMicro / free.limitMicro) * 100))
+    : 100
 
   return React.createElement('div', {
     style: { display: 'grid', gap: 6, width: '100%', minWidth: 0, padding: '8px 2px 2px' },
@@ -277,17 +287,32 @@ function QuotaMeter({ wide }) {
   React.createElement('div', {
     style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, lineHeight: '16px' },
   },
-    React.createElement('span', { style: { opacity: 0.75 } }, '今日额度'),
-    React.createElement('span', { style: { opacity: 0.9, whiteSpace: 'nowrap' } },
-      exhausted ? '已用完' : '已用 ' + meter.usedPercent + '%'),
+    React.createElement('span', { style: { opacity: 0.75 } }, '今日免费'),
+    React.createElement('span', { style: { opacity: 0.75, whiteSpace: 'nowrap' } },
+      yuan(free.remainingMicro) + ' / ' + yuan(free.limitMicro)),
   ),
   React.createElement('div', {
     style: meterTrackStyle, role: 'progressbar',
-    'aria-valuenow': meter.usedPercent, 'aria-valuemin': 0, 'aria-valuemax': 100,
+    'aria-valuenow': freeUsedPercent, 'aria-valuemin': 0, 'aria-valuemax': 100,
   },
-    React.createElement('div', { style: { ...meterFillStyle, width: Math.max(2, meter.usedPercent) + '%' } })),
+    React.createElement('div', { style: { ...meterFillStyle, width: Math.max(2, freeUsedPercent) + '%' } })),
+  React.createElement('div', {
+    style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, lineHeight: '16px' },
+  },
+    React.createElement('span', { style: { opacity: 0.75 } }, 'Mareo 余额'),
+    React.createElement('span', { style: { fontWeight: 500, whiteSpace: 'nowrap' } }, yuan(snapshot.wallet.balanceMicro)),
+  ),
+  React.createElement('div', {
+    style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, lineHeight: '16px', opacity: 0.6 },
+  },
+    React.createElement('span', null, '可用合计'),
+    React.createElement('span', { style: { whiteSpace: 'nowrap' } }, yuan(snapshot.total.remainingMicro)),
+  ),
   exhausted
-    ? React.createElement('span', { style: { fontSize: 12, opacity: 0.7 } }, '北京时间 0 点后自动恢复。')
+    ? React.createElement('span', { style: { fontSize: 12, opacity: 0.7 } }, '额度已用完 · 获取更多额度')
+    : null,
+  exhausted
+    ? React.createElement('span', { style: { fontSize: 12, opacity: 0.6 } }, '免费额度北京时间 0 点后恢复。')
     : null)
 }
 

@@ -2,8 +2,10 @@
  * The gateway's quota meter, fetched in the main process (which holds the
  * token) and handed to the UI as plain numbers.
  *
- * The UI shows a percentage, never an amount: what the user needs to know is
- * "how much of today is left", not what their reading costs us.
+ * The user sees money, in yuan: today's free allowance and the Mareo Wallet
+ * behind it. Token counts, model prices and the settlement rate never leave the
+ * gateway — the client is given the two buckets it has to draw, and nothing
+ * else.
  */
 export interface QuotaMeter {
   limitMicro: number
@@ -18,7 +20,14 @@ export interface QuotaMeter {
 }
 
 export interface QuotaSnapshot {
+  /** Kept for the older shape: the free allowance, as the meter used to show it. */
   quota: QuotaMeter
+  /** Today's free allowance, which refills at 00:00 Beijing. */
+  free: { limitMicro: number; usedMicro: number; remainingMicro: number; resetAt: string }
+  /** The wallet, which never expires and can be negative after an overdraft. */
+  wallet: { balanceMicro: number }
+  /** Free remaining plus wallet: what the user could still spend today. */
+  total: { remainingMicro: number }
 }
 
 const REQUEST_TIMEOUT_MS = 5_000
@@ -59,24 +68,46 @@ export class QuotaClient {
 /** Anything the UI will render is checked first; the gateway is ours but the shape still matters. */
 export function readSnapshot(raw: unknown): QuotaSnapshot | null {
   if (raw === null || typeof raw !== 'object') return null
-  const quota = (raw as { quota?: unknown }).quota
-  if (quota === null || typeof quota !== 'object') return null
-  const meter = quota as Record<string, unknown>
-  const numbers = ['limitMicro', 'spentMicro', 'remainingMicro', 'usedPercent'] as const
-  for (const field of numbers) {
-    if (typeof meter[field] !== 'number' || !Number.isFinite(meter[field])) return null
-  }
+  const body = raw as Record<string, unknown>
+  const quota = numbersOf(body.quota, ['limitMicro', 'spentMicro', 'remainingMicro', 'usedPercent'])
+  const free = numbersOf(body.free, ['limitMicro', 'usedMicro', 'remainingMicro'])
+  const wallet = numbersOf(body.wallet, ['balanceMicro'])
+  const total = numbersOf(body.total, ['remainingMicro'])
+  if (quota === undefined || free === undefined || wallet === undefined || total === undefined) return null
+  const meter = body.quota as Record<string, unknown>
+  const freeBucket = body.free as Record<string, unknown>
   if (typeof meter.exhausted !== 'boolean' || typeof meter.visible !== 'boolean') return null
-  if (typeof meter.resetAt !== 'string') return null
+  if (typeof meter.resetAt !== 'string' || typeof freeBucket.resetAt !== 'string') return null
   return {
     quota: {
-      limitMicro: meter.limitMicro as number,
-      spentMicro: meter.spentMicro as number,
-      remainingMicro: meter.remainingMicro as number,
-      usedPercent: Math.min(100, Math.max(0, meter.usedPercent as number)),
+      limitMicro: quota.limitMicro,
+      spentMicro: quota.spentMicro,
+      remainingMicro: quota.remainingMicro,
+      usedPercent: Math.min(100, Math.max(0, quota.usedPercent)),
       exhausted: meter.exhausted,
       resetAt: meter.resetAt,
       visible: meter.visible,
     },
+    free: {
+      limitMicro: free.limitMicro,
+      usedMicro: free.usedMicro,
+      remainingMicro: free.remainingMicro,
+      resetAt: freeBucket.resetAt,
+    },
+    wallet: { balanceMicro: wallet.balanceMicro },
+    total: { remainingMicro: total.remainingMicro },
   }
+}
+
+/** The named fields as finite numbers, or undefined when any of them is unusable. */
+function numbersOf(source: unknown, fields: readonly string[]): Record<string, number> | undefined {
+  if (source === null || typeof source !== 'object') return undefined
+  const record = source as Record<string, unknown>
+  const values: Record<string, number> = {}
+  for (const field of fields) {
+    const value = record[field]
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+    values[field] = value
+  }
+  return values
 }

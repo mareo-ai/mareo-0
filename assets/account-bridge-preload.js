@@ -10,8 +10,9 @@ contextBridge.exposeInMainWorld('__mareoSponsoredAd', {
   click: (adId) => ipcRenderer.invoke('mareo:ad:click', adId),
 })
 
-// The daily quota meter. Read-only: the renderer learns a percentage, and the
-// gateway alone decides what anyone may spend.
+// The quota meter. Read-only: the renderer learns what is left in yuan — today's
+// free allowance and the wallet behind it — and the gateway alone decides what
+// anyone may spend.
 contextBridge.exposeInMainWorld('__mareoQuota', {
   get: () => ipcRenderer.invoke('mareo:quota:get'),
 })

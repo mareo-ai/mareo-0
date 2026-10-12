@@ -1,14 +1,18 @@
-// The meter is the only part of the quota a user sees, so what it renders — and
-// what it deliberately does not render — is worth pinning down. No amounts
-// appear anywhere in this component.
+// The meter is the only part of the quota a user sees. It shows money — today's
+// free allowance and the wallet behind it — and never a token count, a model
+// price or the settlement rate. What it renders, and what it refuses to render,
+// is worth pinning down.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
+import { readSnapshot } from '../src/quota.js'
 
 interface Snapshot {
   quota: { limitMicro: number; spentMicro: number; remainingMicro: number; usedPercent: number; exhausted: boolean; resetAt: string; visible: boolean }
-  reward?: unknown
+  free: { limitMicro: number; usedMicro: number; remainingMicro: number; resetAt: string }
+  wallet: { balanceMicro: number }
+  total: { remainingMicro: number }
 }
 
 function meterHarness(snapshot: Snapshot | null) {
@@ -86,45 +90,77 @@ function meterHarness(snapshot: Snapshot | null) {
   }
 }
 
-function full(overrides: Partial<Snapshot['quota']> = {}): Snapshot {
-  return {
+const RESET_AT = '2026-09-17T16:00:00.000Z'
+
+function full(overrides: Partial<Snapshot> = {}): Snapshot {
+  const base: Snapshot = {
     quota: {
       limitMicro: 10_000_000,
       spentMicro: 6_200_000,
       remainingMicro: 3_800_000,
       usedPercent: 62,
       exhausted: false,
-      resetAt: '2026-09-17T16:00:00.000Z',
+      resetAt: RESET_AT,
       visible: true,
-      ...overrides,
     },
+    free: { limitMicro: 10_000_000, usedMicro: 6_200_000, remainingMicro: 3_800_000, resetAt: RESET_AT },
+    wallet: { balanceMicro: 23_500_000 },
+    total: { remainingMicro: 27_300_000 },
   }
+  return { ...base, ...overrides }
 }
 
-test('the meter shows a percentage and never an amount', async () => {
-  const harness = meterHarness(full())
-  const node = await harness.render()
+test('the meter shows both buckets in yuan and nothing else', async () => {
+  const node = await meterHarness(full()).render()
   assert.ok(node !== null)
   const text = JSON.stringify(node)
-  assert.match(text, /已用 62%/)
+  assert.match(text, /今日免费/)
+  assert.match(text, /¥3\.80 \/ ¥10\.00/)
+  assert.match(text, /Mareo 余额/)
+  assert.match(text, /¥23\.50/)
+  assert.match(text, /可用合计/)
+  assert.match(text, /¥27\.30/)
   assert.match(text, /progressbar/)
-  assert.doesNotMatch(text, /¥/)
-  assert.doesNotMatch(text, /6200000/, 'no raw amounts reach the renderer output')
+  // Micro-yuan stops at the gateway: every amount on screen is in yuan.
+  assert.doesNotMatch(text, /[0-9]{7}/)
+  assert.doesNotMatch(text, /已用 62%/, 'the percentage is replaced by the amount')
+  assert.doesNotMatch(text, /token/i)
 })
 
-test('an exhausted account is told when it comes back, and is offered nothing', async () => {
-  const harness = meterHarness(full({ usedPercent: 100, exhausted: true, remainingMicro: 0 }))
-  const node = await harness.render()
-  const text = JSON.stringify(node)
-  assert.match(text, /已用完/)
-  assert.match(text, /北京时间 0 点后自动恢复/)
+test('an exhausted account is told it is out, and is offered nothing to buy', async () => {
+  const spent = { limitMicro: 10_000_000, usedMicro: 10_000_000, remainingMicro: 0, resetAt: RESET_AT }
+  const harness = meterHarness(
+    full({
+      quota: { ...full().quota, spentMicro: 10_000_000, remainingMicro: 0, usedPercent: 100, exhausted: true },
+      free: spent,
+      wallet: { balanceMicro: 0 },
+      total: { remainingMicro: 0 },
+    }),
+  )
+  const text = JSON.stringify(await harness.render())
+  assert.match(text, /额度已用完 · 获取更多额度/)
+  assert.match(text, /免费额度北京时间 0 点后恢复/)
   // No task, no ad, no button: earning quota has no user-facing entry yet.
   assert.doesNotMatch(text, /模拟/)
   assert.doesNotMatch(text, /button/)
 })
 
+test('a wallet pushed negative by an allowed overdraft reads as a debt', async () => {
+  const harness = meterHarness(
+    full({
+      free: { limitMicro: 10_000_000, usedMicro: 9_000_000, remainingMicro: 1_000_000, resetAt: RESET_AT },
+      wallet: { balanceMicro: -200_000 },
+      total: { remainingMicro: 1_000_000 },
+    }),
+  )
+  const text = JSON.stringify(await harness.render())
+  assert.match(text, /-¥0\.20/)
+  assert.match(text, /可用合计/)
+  assert.match(text, /¥1\.00/)
+})
+
 test('nothing renders when the gateway is not running a quota for this account', async () => {
-  const hidden = await meterHarness(full({ visible: false })).render()
+  const hidden = await meterHarness(full({ quota: { ...full().quota, visible: false } })).render()
   assert.equal(hidden, null)
   const missing = await meterHarness(null).render()
   assert.equal(missing, null)
@@ -132,4 +168,25 @@ test('nothing renders when the gateway is not running a quota for this account',
 
 test('a collapsed sidebar renders nothing', async () => {
   assert.equal(await meterHarness(full()).render(false), null)
+})
+
+test('a meter that cannot be read is refused rather than half-rendered', () => {
+  const good = full()
+  const parsed = readSnapshot(JSON.parse(JSON.stringify(good)) as unknown)
+  assert.equal(parsed?.wallet.balanceMicro, 23_500_000)
+  assert.equal(parsed?.free.remainingMicro, 3_800_000)
+  assert.equal(parsed?.total.remainingMicro, 27_300_000)
+
+  // A gateway that predates the wallet sends no free/wallet/total: the meter
+  // hides instead of showing a balance it does not have.
+  assert.equal(readSnapshot({ quota: good.quota }), null)
+  assert.equal(readSnapshot({ ...good, wallet: undefined }), null)
+  assert.equal(readSnapshot({ ...good, total: { remainingMicro: 'lots' } }), null)
+  assert.equal(readSnapshot(null), null)
+  assert.equal(readSnapshot({ ...good, quota: { ...good.quota, resetAt: 17 } }), null)
+
+  // An overdraft is a real state, and a percentage out of range is clamped.
+  assert.equal(readSnapshot({ ...good, wallet: { balanceMicro: -200_000 } })?.wallet.balanceMicro, -200_000)
+  assert.equal(readSnapshot({ ...good, quota: { ...good.quota, usedPercent: 130 } })?.quota.usedPercent, 100)
+  assert.equal(readSnapshot({ ...good, quota: { ...good.quota, usedPercent: -5 } })?.quota.usedPercent, 0)
 })
