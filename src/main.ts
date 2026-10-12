@@ -260,7 +260,10 @@ async function startMareo(): Promise<void> {
         env: {
           // Model credentials come from the account, never from the user.
           DEEPSEEK_API_KEY: account.token,
-          DEEPSEEK_BASE_URL: GATEWAY_URL,
+          // The harness speaks the Messages API (it appends `/v1/messages`) and
+          // authenticates with the token as `x-api-key`, so the base stops at
+          // `/anthropic` — the same shape the search provider below uses.
+          DEEPSEEK_BASE_URL: `${GATEWAY_URL}/anthropic`,
           // The bundled web search calls the model API on its own; without this
           // it goes straight to DeepSeek with the account token, which that
           // endpoint does not accept — and nothing would be metered. The
