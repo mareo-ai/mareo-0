@@ -126,7 +126,33 @@ DSH 带原生模块（`node-addon-require-builtin`、`sharp`、`koffi`、`pty.no
 | 我们 inject 的 4 个包 | ✓ renderer / sidebar / conversation / layout 都在 |
 | 测试 | ✓ `runtime/package.json` 的钉版与 patch 断言已写进 `tests/dsh-runtime.test.ts`，客户端测试 84/84 |
 | 会话格式 | ⚠ 见第 6 节回滚说明（v3 → v4，非破坏性） |
-| 真机烟测（macOS / Windows） | ⬜ 待做——品牌 UI 与额度条的实际渲染、模型请求确实走网关计费，只能真机验 |
+| 真机烟测（macOS） | ✓ 已跑（2026-10-13）：品牌渲染正常；**两行额度条正常渲染**（`今日免费 ¥7.87 / ¥10.00` + 细进度条 + `Mareo 余额` + `可用合计`）——证明客户端插件 → preload 桥 → 主进程 → 网关 `/quota` 这条链路在新宿主上通。烟测同时抓到下面两个真问题 |
+| 真机烟测（Windows） | ⬜ 待做（发版前用 Windows 构建流程验一次） |
+
+## 8.1 烟测抓到的两个真问题（都只有真机能发现）
+
+**① 禁错了 `config-editor`**（已修，见第 5 节的警告框）：它名字像"配置编辑器"，实际是设置服务的地基，禁掉会让 `settings` 永久 pending，连带我们自己的 Account 区一起挂。
+
+**② DSH 0.2 换了调用协议**（这才是本次升级的主要工作量）：
+
+| | 0.1.5（线上在用） | 0.2.0 |
+|---|---|---|
+| 端点 | `POST /chat/completions`（OpenAI 形态） | `POST ${base}/v1/messages`（**只支持 Messages API**，代码里写死 `protocol is not configurable`） |
+| 默认 base | `https://api.deepseek.com` | `https://api.deepseek.com/anthropic` |
+| 认证头 | `Authorization: Bearer` | **`x-api-key`**（新的 `dsh-llm-deepseek-api-key` 只发这个头） |
+| 对话/标题路径 | `/chat/completions` | 与搜索同为 `/anthropic/v1/messages` |
+
+第一次烟测就是因此失败的：nginx 里留下 `POST /v1/messages 401 25 bytes deepseek-harness/0.2.0-rc.2`（25 字节正是我们网关的 `{"error":"invalid token"}`）。
+
+**由此产生的三处改动**：
+
+1. **网关认证**：接受 `x-api-key: <令牌>` 等同 `Authorization: Bearer <令牌>`（加法，对 0.1.5 无影响）。
+2. **网关分类**：搜索改按**请求体内容**判别（`tools[].type === "web_search_20250305"`，两版一致），因为 0.2.0 把对话与标题也放到同一路径——否则每轮对话都会被记成"搜索"。
+3. **客户端 `src/main.ts`**：`DEEPSEEK_BASE_URL` 由 `${GATEWAY_URL}` 改为 **`${GATEWAY_URL}/anthropic`**（provider 自己会追加 `/v1/messages`）。搜索端不变。
+
+**已验证无需改动**：流式用量解析（真实 Messages 流最后一帧 `message_delta` 带**完整** usage，不是官方 Anthropic 那种只给 output）、价目表（0.2.0 只发 `deepseek-flash` / `deepseek-v4-pro`，都在表内）、客户端 slot、inject 目标、会话头、标题提示词。
+
+**状态**：网关两处已实现并**已上线**（2026-10-13 03:07，PR #6；备份 `src.bak-20261013-030735`、`backups/mareo-20261013-030738.db`）；生产实测：`x-api-key` + Messages 路径的对话体 → 200 且记 `chat`、带搜索工具体 → 200 且记 `search`，计费列正确；上线后 12 分钟老客户端 47 笔请求全部 200。客户端那处改动在 `feat/dsh-0.2.0`（commit `a305cf7`），**待随客户端发版**。
 
 ## 9. 待决策（与升级无关，属既有事项）
 
