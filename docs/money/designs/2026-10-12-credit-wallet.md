@@ -63,8 +63,9 @@ CREATE UNIQUE INDEX wallet_ledger_ref ON wallet_ledger(source, externalRef) WHER
 **调用后（所有模式）**，单事务内：
 
 ```
+rate       = billing.modelRates[该模型] ?? billing.settlementRate
 actual     = pricing 计算 → 微元
-billable   = ceil(actual × billing.settlementRate)
+billable   = ceil(actual × rate)
 margin     = billable − actual
 freePart   = min(freeRemaining, billable)
 walletPart = billable − freePart
