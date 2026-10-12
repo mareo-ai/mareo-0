@@ -61,7 +61,7 @@ spctl -a -t exec -vv "$APP"            # 期望: accepted, source=Notarized Deve
 | `Mareo.exe` | 打包时 `@electron/packager` 会改写它的图标与版本信息，**这会让 Electron 原本的签名失效**；"签名无效"比未签名更容易被系统刁难 |
 | `MareoSetup.exe` | 用户从浏览器下载、第一次被 SmartScreen 检查的就是它，发布者名称与声誉挂在它身上 |
 
-其余 PE 文件（Electron 的 dll、随包的 `node-runtime/bin/node.exe`）都是**原样复制**、保留厂商自己的有效签名，用我们的证书覆盖既无收益又白耗签名次数。hook 里的白名单在 `scripts/sign-windows.cjs` 的 `isMareoArtifact`。
+其余 PE 文件**不签**：`node.exe`（OpenJS Foundation）、`conpty.dll`/`OpenConsole.exe`（Microsoft）等本来就带有效厂商签名；而 Electron 的 `ffmpeg.dll`、`vk_swiftshader.dll` 等上游就没签，DSH 带进来的原生模块（`libvips`、`sharp`、`rg.exe`…）也没签。它们**不影响 SmartScreen**（它只看用户下载的那个安装包），而全部签下来一次构建要 20–40 次、一年 1000 次的额度几次发版就烧光。hook 里的白名单在 `scripts/sign-windows.cjs` 的 `isMareoArtifact`。
 
 **签名怎么接进构建**（两个时点）：
 
