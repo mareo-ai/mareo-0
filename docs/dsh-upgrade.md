@@ -1,7 +1,8 @@
 # DSH 升级评估与计划（0.1.5-rc.2 → 0.2.0-rc.2）
 
-> **状态：调研完成，待执行。** 负责人 2026-10-13 决定：**等 Credit Wallet 客户端发版之后再做**，现在不动。
-> 本文记录的是"到时候照着做"的前提：要禁用的插件、验收标准、回滚方式。结论都来自实测，不是读文档。
+> **状态：执行中 —— 代码与静态验证已完成（分支 `feat/dsh-0.2.0`），待在 macOS / Windows 真机烟测后随客户端发版。**
+> 负责人 2026-10-13 决定：**先做 DSH 升级，再做充值客户端界面**——充值界面长在 DSH 宿主上（Account 设置页 / `settings.section` slot / preload 桥），先换宿主只需写一遍、验一遍。
+> 本文记录的是"照着做"的前提：要禁用的插件、验收标准、回滚方式。结论都来自实测，不是读文档。
 >
 > 调研方式：在 `/tmp` 里独立安装目标版本，用**与 Mareo 完全相同的启动方式**跑起来核对，不碰仓库、不碰线上。
 
@@ -100,7 +101,7 @@ node24 --expose-internals <dsh020>/lib/bin.js web \
    - 设置里看不到 DeepSeek 账号入口、插件管理器、搜索端点页。
 5. **发版观察**：客户端发版后看 24 小时启动失败率与版本分布（对齐 0.1.9 的启动修复效果）。
 
-**回滚**：`runtime/package.json` 与 patch 都是纯代码改动，回滚就是把这两处改回去重新打包；运行时不写数据库，不涉及数据迁移。
+**回滚**：`runtime/package.json` 与 patch 都是纯代码改动，回滚就是把这两处改回去重新打包。**但注意本地会话数据格式**：0.2.0 新增了 `dsh-session-format-v3-to-v4`，新写入的会话是 v4 代际；迁移本身是**非破坏性**的（包说明写明"在不改写已存储代际的前提下"读取时转换，所以历史会话文件仍是 v3，回滚后照样能读），**回滚的代价是升级后新建的会话在旧客户端里可能读不了**。发版说明里要写清这一点。
 
 ## 7. 打包注意（升级会碰到原生模块）
 
@@ -110,7 +111,20 @@ DSH 带原生模块（`node-addon-require-builtin`、`sharp`、`koffi`、`pty.no
 - App 包里那份是**我们 Developer ID（`Q85U66X3JF`）签名**的，所以线上正常——说明现有打包流程会自动重签，**升级必须走正常的签名构建，不能只替换 node_modules**。
 - 旧代码备份在服务器 `deploy/src.bak-*`、数据库备份在 `deploy/backups/`（见 `agents-landing.md` 状态快照）。
 
-## 8. 待决策（与升级无关，属既有事项）
+## 9. 已完成的验证（2026-10-13，分支 `feat/dsh-0.2.0`）
+
+| 项 | 结果 |
+|---|---|
+| `npm run stage:runtime` | ✓ `Verified Node 24.20.0 and DSH 0.2.0-rc.2` |
+| `npm run verify:brand` | ✓ `Verified official plugin composition and authenticated Web boot`（新版本上品牌宿主正常起来） |
+| 10 个禁用项是否真的生效 | ✓ 用 `--dump-config --patch` 逐条断言，全部 `disabled: true`；`mareo-brand` 已注入且启用 |
+| 客户端 slot 契约 | ✓ `sidebar.brand.mark` / `sidebar.brand.name` / `sidebar.footer.action` / `conversation.hero.brand.mark` / `shell.overlay` / `settings.section` 全部仍在（0.2.0 还多了 `sidebar.toggle.badge`） |
+| 我们 inject 的 4 个包 | ✓ renderer / sidebar / conversation / layout 都在 |
+| 测试 | ✓ `runtime/package.json` 的钉版与 patch 断言已写进 `tests/dsh-runtime.test.ts`，客户端测试 84/84 |
+| 会话格式 | ⚠ 见第 6 节回滚说明（v3 → v4，非破坏性） |
+| 真机烟测（macOS / Windows） | ⬜ 待做——品牌 UI 与额度条的实际渲染、模型请求确实走网关计费，只能真机验 |
+
+## 10. 待决策（与升级无关，属既有事项）
 
 `session-telemetry-otel` 在 **0.1.5 里就已存在**：`mode` 默认 `FEEDBACK_ONLY`，导出到 `https://harness-telemetry.deepseeksvc.com/v1/logs`（0.2.0 改成 `dsh-otel-collector.deepseeksvc.com`），环境变量 `DSH_TELEMETRY_MODE` / `DSH_TELEMETRY_OTLP_URL` 可覆盖。也就是说：用户提交"反馈"时，会话内容会发往 DeepSeek 的采集端点。
 
