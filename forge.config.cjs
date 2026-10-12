@@ -8,8 +8,9 @@ const path = require("node:path");
 const platformArgumentIndex = process.argv.indexOf("--platform");
 const targetPlatform =
   platformArgumentIndex >= 0 ? process.argv[platformArgumentIndex + 1] : process.platform;
-const windowsCertificateFile = process.env.WINDOWS_CERT_FILE;
-const windowsCertificatePassword = process.env.WINDOWS_CERT_PASSWORD;
+// Windows signing runs against the vendor's remote HSM; see scripts/sign-windows.cjs.
+const { hasSigningCredentials, signMareoFile } = require("./scripts/sign-windows.cjs");
+const windowsSign = { hookModulePath: path.join(__dirname, "scripts", "sign-windows.cjs") };
 
 const makers = [];
 if (targetPlatform === "darwin") {
@@ -32,14 +33,6 @@ if (targetPlatform === "win32") {
       iconUrl: "https://mareo.cn/downloads/app-icon.ico",
       authors: "Wuhan Datou AI Technology Co., Ltd.",
       description: "Mareo desktop host for DeepSeek Harness",
-      // Signing the installer needs the code-signing certificate; without it
-      // the installer is produced unsigned (SmartScreen will warn).
-      ...(windowsCertificateFile && windowsCertificatePassword
-        ? {
-            certificateFile: windowsCertificateFile,
-            certificatePassword: windowsCertificatePassword,
-          }
-        : {}),
     },
   });
 }
@@ -60,6 +53,9 @@ module.exports = {
       },
     },
     extraResource: [".staging/dsh-runtime", ".staging/node-runtime"],
+    // Signs Mareo.exe during packaging, before Squirrel packs it into the
+    // installer; the hook itself decides which files are ours.
+    windowsSign,
     ignore: [
       /^\/\.cache(?:\/|$)/,
       /^\/\.github(?:\/|$)/,
@@ -100,6 +96,13 @@ module.exports = {
             if (target !== artifact) await rename(artifact, target);
           }
           if (result.platform === "win32" && path.basename(artifact) === "MareoSetup.exe") {
+            // Sign before publishing copies: a copy keeps its signature, so the
+            // versioned name is signed as well.
+            if (hasSigningCredentials()) {
+              signMareoFile(artifact);
+            } else {
+              console.log("no signing credentials in the environment; leaving MareoSetup.exe unsigned");
+            }
             // Keep MareoSetup.exe (Squirrel's update chain needs the fixed name)
             // and publish a versioned copy for humans and manifests.
             await copyFile(artifact, path.join(path.dirname(artifact), `Mareo-${version}-windows-${arch}-setup.exe`));

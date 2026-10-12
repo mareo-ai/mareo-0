@@ -1,13 +1,15 @@
 name: Windows build
 
-# Builds the signed-capable Squirrel installer on a Windows runner, so no local
-# Windows machine is needed. Trigger it from the Actions tab; the installer is
-# attached as a downloadable artifact.
+# Builds the signed Squirrel installer on a Windows runner, so no local Windows
+# machine is needed. Trigger it from the Actions tab; the installer is attached
+# as a downloadable artifact.
 #
-# Signing is opt-in: add the repository secrets
-#   WINDOWS_CERT_BASE64   base64 of the .pfx code-signing certificate
-#   WINDOWS_CERT_PASSWORD the .pfx password
-# and the build starts producing signed installers without further changes.
+# Signing runs through the sslTrus remote signing service (the certificate has no
+# UKey), so the build needs the repository secrets
+#   SSLTRUS_ACCESS_KEY      access key of the code-signing subscription
+#   SSLTRUS_ACCESS_SECRET   its secret
+#   SSLTRUS_CERT_CODE       which certificate to sign with (see docs/signing.md)
+# and fails rather than publishing an unsigned installer.
 
 on:
   workflow_dispatch:
@@ -30,26 +32,20 @@ jobs:
       - name: Verify pinned Node runtime for Windows
         run: npm run check:node:win
 
-      - name: Prepare signing certificate (optional)
+      - name: Install the signing CLI
         shell: pwsh
         env:
-          CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          if (-not $env:CERT_BASE64) {
-            Write-Host "No WINDOWS_CERT_BASE64 secret configured; building an unsigned installer."
-            exit 0
-          }
-          $path = Join-Path $env:RUNNER_TEMP 'mareo-codesign.pfx'
-          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:CERT_BASE64))
-          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_CERT_FILE=$path"
-          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_CERT_PASSWORD=$env:CERT_PASSWORD"
-          Add-Content -Path $env:GITHUB_ENV -Value "CSC_LINK=$path"
-          Add-Content -Path $env:GITHUB_ENV -Value "CSC_KEY_PASSWORD=$env:CERT_PASSWORD"
-          Write-Host "Signing certificate prepared."
+          ACCESS_KEY: ${{ secrets.SSLTRUS_ACCESS_KEY }}
+          ACCESS_SECRET: ${{ secrets.SSLTRUS_ACCESS_SECRET }}
+          SSLTRUS_CERT_CODE: ${{ secrets.SSLTRUS_CERT_CODE }}
+        run: ./scripts/install-signing-cli.ps1
 
       - name: Build installer
         run: npm run make:win
+
+      - name: Verify the signatures
+        shell: pwsh
+        run: ./scripts/verify-windows-signatures.ps1
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

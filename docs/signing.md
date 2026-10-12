@@ -1,6 +1,9 @@
-# Mareo macOS 签名与公证（Developer ID + Notarytool）
+# Mareo 代码签名（macOS 公证 + Windows 云签名）
 
-让官网下载的 DMG 在普通用户双击时**不再被 Gatekeeper 拦截**。只影响打包环节，不影响代码与运行时。
+让官网下载的安装包在普通用户机器上**不再被 Gatekeeper / SmartScreen 拦下**。只影响打包环节，不影响代码与运行时。
+
+- macOS：用 Apple **Developer ID** 证书签名 + Notarytool 公证（下文第一、二节）。
+- Windows：用**锐安信（sslTrus）云签名**——证书不含 UKey，私钥在厂商 HSM 里，签名通过他们的 CLI 完成（见"Windows 云签名"一节）。
 
 ## 前置（一次性，Apple 侧）
 
@@ -47,6 +50,48 @@ xcrun stapler validate "$APP" && echo "公证已附带"
 spctl -a -t exec -vv "$APP"            # 期望: accepted, source=Notarized Developer ID
 ```
 
+## Windows 云签名（锐安信 sslTrus，无 UKey）
+
+**买的是什么**：DigiCert 普通（OV）代码签名证书 + **远程代码签名服务**订阅（按签名次数计费，¥500/年 = 1000 次）。证书"不含 UKey"意味着私钥生成并保存在厂商的 FIPS 140-3 云端 HSM 内、不可导出；本地只算文件哈希上传，签名在云端完成。所以**没有 pfx、也没有私钥落盘**。
+
+**一次发版签哪些文件**：只有两个，都是我们自己的二进制。
+
+| 文件 | 为什么必须签 |
+|---|---|
+| `Mareo.exe` | 打包时 `@electron/packager` 会改写它的图标与版本信息，**这会让 Electron 原本的签名失效**；"签名无效"比未签名更容易被系统刁难 |
+| `MareoSetup.exe` | 用户从浏览器下载、第一次被 SmartScreen 检查的就是它，发布者名称与声誉挂在它身上 |
+
+其余 PE 文件（Electron 的 dll、随包的 `node-runtime/bin/node.exe`）都是**原样复制**、保留厂商自己的有效签名，用我们的证书覆盖既无收益又白耗签名次数。hook 里的白名单在 `scripts/sign-windows.cjs` 的 `isMareoArtifact`。
+
+**签名怎么接进构建**（两个时点）：
+
+1. **打包阶段**：`forge.config.cjs` 的 `packagerConfig.windowsSign` 指向 hook，`@electron/windows-sign` 会为 app 目录里每个 PE 文件回调一次，hook 只签 `Mareo.exe`（其余每个文件打一行 `skipping …` 日志）。发生在 Squirrel 打包**之前**，所以 nupkg 里装出来的也是签名版本。
+2. **`postMake`**：签 Squirrel 产出的 `MareoSetup.exe`，**然后**才复制出版本化副本（复制保留签名，所以两个名字都是签好的）。
+
+> ⚠️ `@electron/packager` 会**吞掉**签名失败（debug 后继续打包）。所以 CI 里的 `scripts/verify-windows-signatures.ps1` 才是真正的守门人：它断言这两个文件 `Status = Valid`，并把 app 目录里其它 PE 文件的签名状态打印出来（用来验证"厂商签名仍然有效"这个前提；一旦某个文件显示 NotSigned，就该把它加进签名名单）。
+
+**CI 需要的三个 secret**：`SSLTRUS_ACCESS_KEY`、`SSLTRUS_ACCESS_SECRET`、`SSLTRUS_CERT_CODE`。前两个建议用**订阅密钥**（控制台 → 代码签名证书 → 详情 → 安全 → Access Key → 创建凭证，权限只覆盖这一张证书）。
+
+**证书编号（Cert Code）怎么拿**：`SSLTRUS_CERT_CODE` 就是他们 CLI 的 `--cert-code`，指"用哪张证书签名"。权威拿法是配置好 AK/SK 后跑一次：
+
+```sh
+export ACCESS_KEY=... ACCESS_SECRET=...
+signtool quota --json      # 输出里含"证书编号"与剩余次数
+```
+
+**本地验证（不消耗签名次数）**：CLI 有 `--dry-run`，可以先把调用链走通；`signtool quota` 只查询、不计次。CLI 下载页 <https://pccs.ssltrus.cn/oss-code-sign-client/index.html>，版本索引 `latest.json`（安装脚本会校验 sha256）。
+
+**排障**：
+
+| 现象 | 原因/处理 |
+|---|---|
+| 构建报 `Windows signing needs ACCESS_KEY…` | 三个 secret 没配齐；release 构建**必须**有签名，不要改成"跳过" |
+| `status = UnknownError` 或仍提示"文件已被修改" | 打包后的 exe 带着失效的旧签名；hook 已用 `--nest=false` 先清掉再签，若仍复现检查该参数 |
+| 签名次数不够 | 在控制台查额度；我们每次构建只消耗 2 次左右 |
+| 换证书/续期 | 主体保持一致可延续 SmartScreen 声誉；换证后 CI 依据 `Status = Valid` 会自动通过，如需额外核对主体，把 `verify-windows-signatures.ps1` 打印的 thumbprint 记进本文件 |
+
+**关于 SmartScreen 的预期**：OV 证书**不会立刻消除**"Windows 已保护你的电脑"，新证书声誉要从零积累（通常几百到几千次安装），期间用户仍会看到提示但能看到发布者名称；只有 EV 才可能立即免警告。
+
 ## 发布
 
 把签名 DMG 上传服务器替换 `downloads/` 下旧文件，并把官网"未签名内测版"提示改为正式版说明（改 `website/index.html` 文案 + 重新 rsync）。
@@ -58,7 +103,7 @@ spctl -a -t exec -vv "$APP"            # 期望: accepted, source=Notarized Deve
 | 提示无 Developer ID 证书 | 按上文在 **这台 Mac** 用 Xcode 生成；`security find-identity` 应能看到 |
 | 公证报错 invalid | 确认 `APPLE_APP_SPECIFIC_PASSWORD` 是 App 专用密码（不是登录密码）且账号是开发者账号本人 |
 | `npm run make` 拉 Electron 超时 | 记得 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` |
-| 只想快速出个未签名包 | 不设任何签名环境变量直接 `npm run make`（自动跳过） |
+| 只想快速出个未签名包 | macOS：不设任何签名环境变量直接 `npm run make`；Windows 的 `make:win` 在缺签名凭据时会打一行 warning 并产出未签名包（**发布流程不允许**，CI 会先失败） |
 
 ## 一键发布
 
