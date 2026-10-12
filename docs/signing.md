@@ -68,7 +68,18 @@ spctl -a -t exec -vv "$APP"            # 期望: accepted, source=Notarized Deve
 1. **打包阶段**：`forge.config.cjs` 的 `packagerConfig.windowsSign` 指向 hook，`@electron/windows-sign` 会为 app 目录里每个 PE 文件回调一次，hook 只签 `Mareo.exe`（其余每个文件打一行 `skipping …` 日志）。发生在 Squirrel 打包**之前**，所以 nupkg 里装出来的也是签名版本。
 2. **`postMake`**：签 Squirrel 产出的 `MareoSetup.exe`，**然后**才复制出版本化副本（复制保留签名，所以两个名字都是签好的）。
 
-> ⚠️ `@electron/packager` 会**吞掉**签名失败（debug 后继续打包）。所以 CI 里的 `scripts/verify-windows-signatures.ps1` 才是真正的守门人：它断言这两个文件 `Status = Valid`，并把 app 目录里其它 PE 文件的签名状态打印出来（用来验证"厂商签名仍然有效"这个前提；一旦某个文件显示 NotSigned，就该把它加进签名名单）。
+> ⚠️ `@electron/packager` 会**吞掉**签名失败（debug 后继续打包）。所以 CI 里的 `scripts/verify-windows-signatures.ps1` 才是真正的守门人：它断言这两个文件 `Status = Valid` **且签名者指纹等于下面这枚证书**，并把 app 目录里其它 PE 文件的签名状态打印出来。
+
+**在用证书（2026-10 首发）**：主体 `CN=武汉市大头人工智能科技有限公司, O=…, L=武汉市, S=湖北省, C=CN`；SHA-1 指纹（`Get-AuthenticodeSignature` 的 Thumbprint）**`24F773B0CEC1D43AD42752B2050E0105A901F7DD`**。校验脚本里硬编码了这个值——**换证/续期后必须同步更新**，否则 CI 会明确报错（这是故意的，避免错误的证书静默通过）。
+
+**2026-10-12 首次签名构建的实测（`windows-build` 运行 38268197511）**：
+
+- 两个目标 `Valid`，签名者指纹就是上面那枚；**一次构建消耗 2 次签名**（控制台"已签名次数 2"），1000 次/年 ≈ 500 次构建。
+- 盘点结论（修正了"Electron 的 dll 全都带厂商签名"这个想当然）：
+  - **带有效厂商签名**：`node.exe`（OpenJS Foundation）、`conpty.dll`/`OpenConsole.exe`（Microsoft）、`d3dcompiler_47.dll`/`dxil.dll`（Microsoft Windows）。
+  - **未签名**：Electron 的 `ffmpeg.dll`、`vk_swiftshader.dll`、`vulkan-1.dll`、`dxcompiler.dll`，以及 DSH 带进来的原生模块（`libvips-*.dll`、`sharp-*.node`、`koffi.node`、`rg.exe`、`conpty.node` 等）。
+  - 这些**不影响 SmartScreen**（它只看用户下载的那个安装包），而按全量签名的话一次构建要 20–40 次、一年额度几次发版就烧光，所以维持"只签两个"。
+  - 若将来某个本来 `Valid` 的文件变成 `NotSigned`，说明上游换了打包方式，值得查。
 
 **CI 需要的三个 secret**：`SSLTRUS_ACCESS_KEY`、`SSLTRUS_ACCESS_SECRET`、`SSLTRUS_CERT_CODE`。前两个建议用**订阅密钥**（控制台 → 代码签名证书 → 详情 → 安全 → Access Key → 创建凭证，权限只覆盖这一张证书）。
 
