@@ -19,8 +19,9 @@ Mareo 是 **DeepSeek Harness（DSH）的桌面薄壳**：DSH 始终是第三方�
 | `server/` | 自建网关：零框架 Node + TS + `node:sqlite` | `src/server.ts`（路由）、`proxy.ts`（转发 + 用量解析）、`quota.ts`、`rewards.ts`（奖励账本）、`pricing.ts`（唯一算钱入口）、`cost-report.ts`、`settings.ts`、`db.ts`（schema） |
 | `website/` | 官网（纯静态） | `index.html`、`app.js`、`privacy*.html` |
 | `docs/` | 运维/发布/合规文档 | `operations.md`（最常查）、`release.md`、`signing.md`、`metrics.md`、`updates.md`、`privacy.md` |
+| `docs/money/` | **一切与钱有关的口径与设计文档**（唯一去处） | `standard.md`（权威口径）、`designs/<日期>-<slug>.md`（每次改动一份，先于代码） |
 | `scripts/` | 构建、发布、站点、OSS 脚本 | `stage-runtime.mjs`、`release.mjs`、`publish-oss.mjs`、`deploy-site.mjs`、`sign-macos.mjs` |
-| `tests/` / `server/test/` | 客户端 80 个 / 服务端 76 个测试 | 全部 `node:test`，无 mock 框架 |
+| `tests/` / `server/test/` | 客户端 82 个 / 服务端 76 个测试 | 全部 `node:test`，无 mock 框架 |
 
 ### DSH 的几个"缝"（改客户端前必须知道）
 
@@ -126,6 +127,7 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 - **生产写入必须事先获得人类明确批准，且同一时间只允许一个智能体操作**（网关、数据库、OSS、官网、发布管线都只有一份）。
 - 用户可见文案用**中文**（登录/错误/更新提示等），代码注释与提交信息用**英文**。
 - **不加投机式兼容层**：没有明确兼容需求时，不留双轨实现、不为假想的未来做抽象。
+- **钱的事文档先行**：任何触及计价、结算、入账、账本、报表的改动，先在 `docs/money/designs/<日期>-<slug>.md` 写设计文档（经评审）再写代码；口径只写在 `docs/money/standard.md`，改口径先改它并留变更记录。细则见 `AGENTS.md` 的 "Money changes: documentation first"。
 - 结论必须来自**存储值或真实数据**（数据库、日志、报表），不能只凭 HTTP 200 或"看起来对了"。
 
 ---

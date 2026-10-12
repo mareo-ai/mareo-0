@@ -157,3 +157,49 @@ the DSH seams, how to run and verify (including the gateway's own test suite), t
 production operating rules and who may write where, the current state snapshot, and
 the known issues. It also lists the file surfaces each workstream owns, so you do not
 edit a file another agent is holding.
+
+## Money changes: documentation first
+
+Anything that touches money — how a request is priced, what a user is charged, how
+credit is granted or spent, what the ledger holds, what the reports print — **starts
+with a design document, and that document is committed and reviewed before any
+implementation code is written**. This applies to every money change, without
+exception.
+
+**Where the documents live.** Nothing about money is documented anywhere else:
+
+- `docs/money/standard.md` — the standing rules and the single source of truth:
+  units, the settlement rate, the deduction order, the credit-source list, the ledger
+  field semantics, and the definition of every number the reports print.
+- `docs/money/designs/<YYYY-MM-DD>-<slug>.md` — one document per money change, dated
+  by the day it was written.
+
+**Changing a rule.** Edit `docs/money/standard.md` first, add a dated row to its
+change log, and only then change the code that depends on it. A shipped rate, rounding
+rule, deduction order, or source list is never changed silently.
+
+**What every money design document must contain.** Keep it to the change at hand; the
+standing rules are referenced, not restated:
+
+1. A header: date, status (`draft` / `confirmed, to implement` / `shipped` /
+   `abandoned`), the documents it depends on, and what it affects.
+2. Goal, scope, and — explicitly — what is out of scope.
+3. The settlement arithmetic and the boundary cases that must be tested, as worked
+   examples (for instance: a request that spans both balances, the allowed overdraft,
+   rounding).
+4. Data model: tables and columns added, changed, or dropped; the migration; and what
+   happens to historical rows.
+5. The flows: the check before a model call, the settlement after it, granting credit,
+   and any daily reset — each precise enough to write a test from.
+6. Interfaces and configuration: response fields and how older clients keep working,
+   operator entry points, settings and their defaults.
+7. Client impact: what users will see, and whether a release is required.
+8. Reporting: which numbers are produced and how each is defined.
+9. Rollout: the order of steps, and how the change is observed before it is enforced.
+10. Verification: unit, integration, and the check that runs against real data.
+11. Risks and trade-offs, stated plainly.
+12. A change log, so the history of a rule is visible rather than inferred.
+
+**A money change is not finished until the document matches what shipped**: update the
+status and the change log in the same branch that changes the behaviour.
+
