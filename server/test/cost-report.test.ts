@@ -7,9 +7,10 @@ import { createTokenAccount, openDatabase, type GatewayDatabase } from '../src/d
 import { isTitleRequest, textFromResponseTail, usageFromResponseText } from '../src/proxy.js'
 import { cacheHitRate, costOf, isPeakHour, knownModels, priceFor } from '../src/pricing.js'
 import { recordUsage } from '../src/usage.js'
-import { categoryBreakdown, dayOf, loadSessionTitles, loadTitleFeed, parseBillArguments, perSessionCost, perUserCost, percentile, summarizeDays, tokensOf } from '../src/cost-report.js'
+import { categoryBreakdown, dayOf, loadRows, loadSessionTitles, loadTitleFeed, parseBillArguments, perSessionCost, perUserCost, percentile, summarizeDays, tokensOf, walletAndMargin } from '../src/cost-report.js'
 import { classifyTitle } from '../src/session-labels.js'
 import { parseSessionTitleDetail, recordSessionTitle } from '../src/session-titles.js'
+import { chargeWallet, grantCredit } from '../src/wallet.js'
 
 let directory: string
 let db: GatewayDatabase
@@ -318,4 +319,92 @@ test('titles are classified into work categories', () => {
   ])
   const breakdown = categoryBreakdown(titles, ['session-a', 'session-b', 'session-c'])
   assert.deepEqual(breakdown, [['coding', 1], ['writing', 1], ['other', 1]])
+})
+
+test('the wallet section reads the eight money numbers off the ledger and the settled rows', () => {
+  // The wallet figures are whole-database sums, so this gets its own database.
+  const isolated = openDatabase(path.join(directory, 'wallet-margin.db'))
+  try {
+    const userId = createTokenAccount(isolated, '钱包报表')
+    // 05:00 UTC on a Monday is off peak, so the prices below are the plain ones,
+    // and the Beijing day is 2026-10-05.
+    const day = '2026-10-05'
+    const at = new Date('2026-10-05T05:00:00.000Z')
+    const rows = [
+      // Flash: 5M cache hits = ¥0.10 real, ¥0.13 charged, all of it from the free
+      // allowance.
+      { model: 'deepseek-flash', tokens: { inputTokens: 5_000_000, cacheHitTokens: 5_000_000, cacheMissTokens: 0, outputTokens: 0, reasoningTokens: 0 }, actualMicro: 100_000, billableMicro: 130_000, paidFromFreeMicro: 130_000 },
+      // The same underlying model under its legacy name: 10M cache hits = ¥0.20
+      // real, ¥0.26 charged, of which the free allowance had ¥0.06 left.
+      { model: 'deepseek-v4-flash', tokens: { inputTokens: 10_000_000, cacheHitTokens: 10_000_000, cacheMissTokens: 0, outputTokens: 0, reasoningTokens: 0 }, actualMicro: 200_000, billableMicro: 260_000, paidFromFreeMicro: 60_000 },
+    ]
+    const ids = rows.map((row) =>
+      recordUsage(isolated, {
+        userId,
+        model: row.model,
+        promptChars: 0,
+        completionChars: 0,
+        status: 200,
+        latencyMs: 0,
+        tokens: row.tokens,
+        usageSource: 'provider',
+        billing: {
+          actualMicro: row.actualMicro,
+          billableMicro: row.billableMicro,
+          marginMicro: row.billableMicro - row.actualMicro,
+          paidFromFreeMicro: row.paidFromFreeMicro,
+        },
+      }),
+    )
+    for (const [index, id] of ids.entries()) isolated.prepare('UPDATE usage SET ts = ? WHERE id = ?').run(at.toISOString(), id)
+    // A 200 whose usage we never captured: it has no money figures at all.
+    const unbilledId = recordUsage(isolated, {
+      userId,
+      model: 'deepseek-flash',
+      promptChars: 1_000,
+      completionChars: 0,
+      status: 200,
+      latencyMs: 0,
+      usageSource: 'missing',
+    })
+    isolated.prepare('UPDATE usage SET ts = ? WHERE id = ?').run(at.toISOString(), unbilledId)
+
+    // Money entering the ledger that day: one purchase (which is a liability, not
+    // revenue) and one ad reward. The second row's wallet part is spent.
+    grantCredit(isolated, { accountId: userId, amountMicro: 5_000_000, source: 'purchase', externalRef: 'ORDER-9', channel: 'wechat', now: at })
+    grantCredit(isolated, { accountId: userId, amountMicro: 1_000_000, source: 'reward_ad', externalRef: 'fake-ad:task-9', now: at })
+    chargeWallet(isolated, { accountId: userId, amountMicro: 200_000, relatedRequestId: ids[1], now: at })
+
+    const section = walletAndMargin(isolated, loadRows(isolated), day)
+    assert.equal(section.purchasedMicro, 5_000_000)
+    assert.equal(section.purchaseCount, 1)
+    assert.deepEqual(section.grantedBySource, [['reward_ad', 1_000_000]])
+    assert.equal(section.consumedMicro, 200_000, '已消耗额度 is the wallet spending, not the free allowance')
+    assert.equal(section.balanceMicro, 5_800_000, 'purchase + reward − spending')
+    assert.equal(section.actualMicro, 300_000)
+    assert.equal(section.billableMicro, 390_000)
+    assert.equal(section.marginMicro, 90_000)
+    assert.equal(section.settledRequests, 2)
+    assert.equal(section.unbilledRequests, 1)
+    assert.equal(section.recomputedMicro, 300_000, 'the rows were priced with the same table, so nothing drifted')
+    // The free allowance's share of the real cost, attributed per row:
+    // 100_000 × 130_000/130_000 + 200_000 × 60_000/260_000.
+    assert.equal(section.freeCostMicro, 100_000 + 46_154)
+    // Two names, the same underlying model — the per-model split is what makes a
+    // one-sided rate override visible.
+    assert.deepEqual(
+      section.byModel.map((entry) => [entry.model, entry.requests, entry.actualMicro, entry.billableMicro, entry.marginMicro]),
+      [
+        ['deepseek-v4-flash', 1, 200_000, 260_000, 60_000],
+        ['deepseek-flash', 1, 100_000, 130_000, 30_000],
+      ],
+    )
+
+    // A figure that no longer matches its own tokens is what the report warns about.
+    const tampered = loadRows(isolated).map((row) => (row.model === 'deepseek-flash' ? { ...row, actualMicro: 1 } : row))
+    const drifted = walletAndMargin(isolated, tampered, day)
+    assert.notEqual(drifted.recomputedMicro, drifted.actualMicro)
+  } finally {
+    isolated.close()
+  }
 })

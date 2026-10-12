@@ -11,6 +11,7 @@ import { openDatabase, type GatewayDatabase } from './db.js'
 import { costOf, type TokenUsage } from './pricing.js'
 import { CATEGORY_LABELS, classifyTitle, type WorkCategory } from './session-labels.js'
 import { readSettings } from './settings.js'
+import { walletTotals } from './wallet.js'
 
 const dbPath = process.env.DB_PATH ?? 'data/mareo.db'
 const BEIJING_OFFSET_MS = 8 * 3600 * 1000
@@ -28,11 +29,21 @@ export interface Row {
   sessionId: string | null
   usageSource: string | null
   requestKind: string | null
+  /** What the request really cost and what the user was charged (v9). */
+  actualMicro: number | null
+  billableMicro: number | null
+  marginMicro: number | null
+  paidFromFreeMicro: number | null
 }
 
 /** The Beijing calendar day a timestamp belongs to. */
 export function dayOf(ts: string): string {
   return new Date(new Date(ts).getTime() + BEIJING_OFFSET_MS).toISOString().slice(0, 10)
+}
+
+/** The instant a Beijing calendar day began, as ISO. */
+export function beijingDayStart(day: string): string {
+  return new Date(Date.parse(`${day}T00:00:00.000Z`) - BEIJING_OFFSET_MS).toISOString()
 }
 
 export function tokensOf(row: Row): TokenUsage | undefined {
@@ -189,6 +200,10 @@ function money(value: number): string {
   return `¥${value.toFixed(2)}`
 }
 
+function moneyMicro(micro: number): string {
+  return money(micro / 1_000_000)
+}
+
 export interface SessionTitleRow {
   sessionId: string
   title: string
@@ -220,11 +235,12 @@ export function categoryBreakdown(titles: Map<string, SessionTitleRow>, sessionI
   return [...counts].sort((left, right) => right[1] - left[1])
 }
 
-function loadRows(db: GatewayDatabase): Row[] {
+export function loadRows(db: GatewayDatabase): Row[] {
   return db
     .prepare(
       `SELECT userId, ts, model, status, inputTokens, cacheHitTokens, cacheMissTokens,
-              outputTokens, reasoningTokens, sessionId, usageSource, requestKind
+              outputTokens, reasoningTokens, sessionId, usageSource, requestKind,
+              actualMicro, billableMicro, marginMicro, paidFromFreeMicro
        FROM usage ORDER BY id`,
     )
     .all() as unknown as Row[]
@@ -233,8 +249,10 @@ function loadRows(db: GatewayDatabase): Row[] {
 /**
  * What a daily quota of `thresholdMicro` would have done on that day: how many
  * accounts it would have stopped, and how much of the day's traffic sits beyond
- * the line. Computed from the same priced rows as everything else, so the shadow
- * numbers cannot drift from the money numbers.
+ * the line. Counted in settlement cost, which is what the free allowance is
+ * actually drawn down by, so these are the numbers enforcement would produce.
+ * Rows recorded before billing existed carry no settlement figure and are
+ * counted at their real cost — the deploy day, and only that day.
  */
 export function quotaImpact(
   rows: Row[],
@@ -249,7 +267,7 @@ export function quotaImpact(
     const cost = costOf(tokens, row.model, new Date(row.ts))
     if (cost === undefined) continue
     const costs = perAccount.get(row.userId) ?? []
-    costs.push(Math.round(cost * 1_000_000))
+    costs.push(row.billableMicro ?? Math.round(cost * 1_000_000))
     perAccount.set(row.userId, costs)
   }
 
@@ -272,6 +290,140 @@ export function quotaImpact(
     if (cumulative > thresholdMicro) blockedAccounts += 1
   }
   return { accounts: perAccount.size, blockedAccounts, blockedRequests, requests, costBeyondMicro }
+}
+
+export interface WalletAndMargin {
+  day: string
+  /** Money that came in as purchases — a liability, not revenue. */
+  purchasedMicro: number
+  purchaseCount: number
+  /** Rewards and grants of the day, by source (purchases excluded). */
+  grantedBySource: [string, number][]
+  /** What users actually spent: the settlement side of the day. */
+  consumedMicro: number
+  /** All-time wallet balance: what Mareo owes its users right now. */
+  balanceMicro: number
+  actualMicro: number
+  billableMicro: number
+  marginMicro: number
+  /** The real cost the free allowance covered: acquisition cost, not COGS. */
+  freeCostMicro: number
+  settledRequests: number
+  /** 200s of the day with no billing figures: before billing existed, or no usage. */
+  unbilledRequests: number
+  /** The same day recomputed from its tokens, so a drift is visible. */
+  recomputedMicro: number
+  byModel: { model: string; requests: number; actualMicro: number; billableMicro: number; marginMicro: number }[]
+}
+
+/**
+ * The day's money as `docs/money/standard.md` defines it: what came in, what was
+ * granted, what was spent, and what was earned. Every figure is either a sum over
+ * the ledger or a sum over the day's settled rows — nothing is estimated except
+ * the free allowance's share of the real cost, which is apportioned per row.
+ */
+export function walletAndMargin(db: GatewayDatabase, rows: Row[], day: string): WalletAndMargin {
+  const from = beijingDayStart(day)
+  const to = new Date(Date.parse(from) + 24 * 3600 * 1000).toISOString()
+  const totals = walletTotals(db, from, to)
+
+  const byModel = new Map<string, { model: string; requests: number; actualMicro: number; billableMicro: number }>()
+  let actualMicro = 0
+  let billableMicro = 0
+  let freeCostMicro = 0
+  let settledRequests = 0
+  let unbilledRequests = 0
+  let recomputedMicro = 0
+  for (const row of rows) {
+    if (dayOf(row.ts) !== day || row.status !== 200) continue
+    const tokens = tokensOf(row)
+    if (tokens !== undefined) {
+      const cost = costOf(tokens, row.model, new Date(row.ts))
+      if (cost !== undefined) recomputedMicro += Math.round(cost * 1_000_000)
+    }
+    if (row.actualMicro === null || row.billableMicro === null) {
+      unbilledRequests += 1
+      continue
+    }
+    settledRequests += 1
+    actualMicro += row.actualMicro
+    billableMicro += row.billableMicro
+    // The free allowance covered part of this request, so that share of its real
+    // cost never earned anything. Attributed per row, not as a daily average.
+    if (row.billableMicro > 0) {
+      freeCostMicro += Math.round((row.actualMicro * (row.paidFromFreeMicro ?? 0)) / row.billableMicro)
+    }
+    const key = row.model ?? '(未知模型)'
+    const entry = byModel.get(key) ?? { model: key, requests: 0, actualMicro: 0, billableMicro: 0 }
+    entry.requests += 1
+    entry.actualMicro += row.actualMicro
+    entry.billableMicro += row.billableMicro
+    byModel.set(key, entry)
+  }
+
+  return {
+    day,
+    purchasedMicro: totals.creditedBySource.get('purchase') ?? 0,
+    purchaseCount: totals.creditedCountBySource.get('purchase') ?? 0,
+    grantedBySource: [...totals.creditedBySource].filter(([source]) => source !== 'purchase').sort((left, right) => right[1] - left[1]),
+    consumedMicro: totals.consumedMicro,
+    balanceMicro: totals.balanceMicro,
+    actualMicro,
+    billableMicro,
+    marginMicro: billableMicro - actualMicro,
+    freeCostMicro,
+    settledRequests,
+    unbilledRequests,
+    recomputedMicro,
+    byModel: [...byModel.values()]
+      .map((entry) => ({ ...entry, marginMicro: entry.billableMicro - entry.actualMicro }))
+      .sort((left, right) => right.billableMicro - left.billableMicro),
+  }
+}
+
+function printWalletAndMargin(section: WalletAndMargin): void {
+  const rate = section.billableMicro === 0 ? '—' : `${((section.marginMicro / section.billableMicro) * 100).toFixed(1)}%`
+  console.log(`\n## ${section.day} 钱包与毛利（口径见 docs/money/standard.md）`)
+  console.log(`  充值金额          ${moneyMicro(section.purchasedMicro).padStart(12)}   ${section.purchaseCount} 笔`)
+  const granted =
+    section.grantedBySource.length === 0
+      ? '—'
+      : section.grantedBySource.map(([source, micro]) => `${source} ${moneyMicro(micro)}`).join(' · ')
+  console.log(`  奖励额度          ${granted}`)
+  console.log(`  已消耗额度        ${moneyMicro(section.consumedMicro).padStart(12)}`)
+  console.log(`  Wallet 余额       ${moneyMicro(section.balanceMicro).padStart(12)}   ← 截至现在的全站负债`)
+  console.log(`  真实模型成本      ${moneyMicro(section.actualMicro).padStart(12)}`)
+  console.log(`  结算成本          ${moneyMicro(section.billableMicro).padStart(12)}   ${section.settledRequests} 笔已结算请求`)
+  console.log(`  毛利              ${moneyMicro(section.marginMicro).padStart(12)}   毛利率 ${rate}`)
+  console.log(`  免费额度真实成本  ${moneyMicro(section.freeCostMicro).padStart(12)}   ← 获客成本，不计入 COGS`)
+  console.log('  口径：1) 充值 ≠ 收入：充值是可消费余额（负债），只有被消耗才形成收入；')
+  console.log('        2) 毛利只按已消耗口径计算，不按充值口径；')
+  console.log('        3) 免费额度消耗不产生收入，但产生成本（获客成本）。')
+
+  if (section.unbilledRequests > 0) {
+    console.log(`  ℹ 该日 ${section.unbilledRequests} 笔 200 没有结算记录（计费上线前写入或缺 usage），未计入上面三项`)
+  }
+  // The day table prices the day from tokens; the section above reads the figures
+  // written when the request was served. They must agree, or one of them is wrong.
+  if (section.recomputedMicro !== section.actualMicro) {
+    console.log(
+      `  ⚠ 库内真实成本 ${moneyMicro(section.actualMicro)} 与按 token 重算 ${moneyMicro(section.recomputedMicro)} 不一致，需查因`,
+    )
+  }
+  if (section.byModel.length > 0) {
+    console.log('  按模型毛利（当日已结算请求）')
+    console.log('    模型                          请求      真实成本      结算成本        毛利     毛利率')
+    for (const entry of section.byModel) {
+      const marginRate = entry.billableMicro === 0 ? '—' : `${((entry.marginMicro / entry.billableMicro) * 100).toFixed(1)}%`
+      console.log(
+        `    ${entry.model.padEnd(28)}${String(entry.requests).padStart(5)}` +
+          moneyMicro(entry.actualMicro).padStart(14) +
+          moneyMicro(entry.billableMicro).padStart(14) +
+          moneyMicro(entry.marginMicro).padStart(12) +
+          marginRate.padStart(11),
+      )
+    }
+  }
 }
 
 function main(): void {
@@ -328,6 +480,7 @@ function main(): void {
   }
 
   const target = dayArgument ?? [...days.keys()].sort().at(-1)!
+  printWalletAndMargin(walletAndMargin(db, rows, target))
   const users = perUserCost(rows, target)
   if (users.length > 0) {
     const costs = users.map((entry) => entry.cost).sort((left, right) => left - right)
