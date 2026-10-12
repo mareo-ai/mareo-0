@@ -111,7 +111,7 @@ DSH 带原生模块（`node-addon-require-builtin`、`sharp`、`koffi`、`pty.no
 - App 包里那份是**我们 Developer ID（`Q85U66X3JF`）签名**的，所以线上正常——说明现有打包流程会自动重签，**升级必须走正常的签名构建，不能只替换 node_modules**。
 - 旧代码备份在服务器 `deploy/src.bak-*`、数据库备份在 `deploy/backups/`（见 `agents-landing.md` 状态快照）。
 
-## 9. 已完成的验证（2026-10-13，分支 `feat/dsh-0.2.0`）
+## 8. 已完成的验证（2026-10-13，分支 `feat/dsh-0.2.0`）
 
 | 项 | 结果 |
 |---|---|
@@ -124,7 +124,7 @@ DSH 带原生模块（`node-addon-require-builtin`、`sharp`、`koffi`、`pty.no
 | 会话格式 | ⚠ 见第 6 节回滚说明（v3 → v4，非破坏性） |
 | 真机烟测（macOS / Windows） | ⬜ 待做——品牌 UI 与额度条的实际渲染、模型请求确实走网关计费，只能真机验 |
 
-## 10. 待决策（与升级无关，属既有事项）
+## 9. 待决策（与升级无关，属既有事项）
 
 `session-telemetry-otel` 在 **0.1.5 里就已存在**：`mode` 默认 `FEEDBACK_ONLY`，导出到 `https://harness-telemetry.deepseeksvc.com/v1/logs`（0.2.0 改成 `dsh-otel-collector.deepseeksvc.com`），环境变量 `DSH_TELEMETRY_MODE` / `DSH_TELEMETRY_OTLP_URL` 可覆盖。也就是说：用户提交"反馈"时，会话内容会发往 DeepSeek 的采集端点。
 
