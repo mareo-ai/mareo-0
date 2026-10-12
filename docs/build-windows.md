@@ -36,7 +36,7 @@ Windows 产物是 **Squirrel 安装包**（`MareoSetup.exe`）。Squirrel 不能
 ## 一、代码与依赖
 
 ```powershell
-git clone git@github.com:ZheFeng/mareo-0.git
+git clone git@github.com:mareo-ai/mareo-0.git
 cd mareo-0
 git checkout main          # 或待验证的任务分支
 npm install

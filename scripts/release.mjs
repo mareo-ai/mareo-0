@@ -165,7 +165,7 @@ async function main() {
   await git('push', '--atomic', 'origin', 'main', `v${version}`)
 
   console.log(`\n已推送 v${version}，构建进度：`)
-  console.log('  https://github.com/ZheFeng/mareo-0/actions/workflows/release.yml')
+  console.log('  https://github.com/mareo-ai/mareo-0/actions/workflows/release.yml')
   console.log('约 20-40 分钟后（含 Apple 公证），官网与客户端会看到新版本。')
 }
 

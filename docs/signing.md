@@ -75,7 +75,7 @@ npm run release -- --dry-run    # 只打印计划，不做任何改动
 npm run release -- --version 0.1.3 --notes "修复账户隔离问题" --minimum-version "" --yes
 ```
 
-脚本会先做安全检查：必须在 `main` 上、工作区干净、本地不落后远端、版本号未重复；任一项不满足就直接退出。推送 tag 后到 [Actions](https://github.com/ZheFeng/mareo-0/actions/workflows/release.yml) 看进度，约 20–40 分钟（含 Apple 公证）。
+脚本会先做安全检查：必须在 `main` 上、工作区干净、本地不落后远端、版本号未重复；任一项不满足就直接退出。推送 tag 后到 [Actions](https://github.com/mareo-ai/mareo-0/actions/workflows/release.yml) 看进度，约 20–40 分钟（含 Apple 公证）。
 
 签名、公证、OSS 上传所需的一切都在 GitHub Secrets 与 Variables 里，见 [`release.md`](release.md)。
 
