@@ -19,9 +19,16 @@
 
 ## 3. 销售结算 billable_cost
 
-- `billable_cost = ceil(actual_model_cost × 销售倍率)`，**按微元向上取整**。
-- **销售倍率 = 1.3**，配置项 `billing.settlementRate`，服务端可调。
-- `margin = billable − actual`。
+- `billable_cost = ceil(actual_model_cost × 该模型的销售倍率)`，**按微元向上取整**。
+- 销售倍率**按模型分别配置**，当前所有模型都是 **1.3**：
+
+| 配置项 | 作用 |
+|---|---|
+| `billing.settlementRate` | 默认倍率，用于没有单独配置的模型（当前 `1.3`） |
+| `billing.modelRates` | 按模型的覆盖表，格式 `模型名:倍率`，逗号分隔，例：`deepseek-v4-pro:1.5,deepseek-flash:1.3` |
+
+- 覆盖表的键**必须是 `pricing.ts` 价目表里存在的模型名**；拼错的键要被**拒绝**（不允许静默回落到默认倍率，否则等于悄悄改了价）。
+- `margin = billable − actual`，**逐笔记录**，所以报表既能看总毛利，也能按模型拆分；改某个模型的倍率**只影响之后的请求**，历史行保持当时结算的倍率（每行的 `actualMicro` 与 `billableMicro` 都在，事后可反推当时用的倍率）。
 - 用户侧**不得出现** token 数、上游单价、销售倍率、毛利。用户只看到人民币金额。
 
 ## 4. 两个桶与扣减顺序
@@ -96,4 +103,5 @@
 
 | 日期 | 改动 | 原因 / 关联文档 |
 |---|---|---|
-| 2026-10-12 | 建立本规范；销售倍率定为 **1.3**；免费额度维持 **¥10/天**；取消按账号的每日额度覆盖；入账统一走 `grantCredit`；消耗与入账合并进一本账 | Credit Wallet 上线，见 [`designs/2026-10-12-credit-wallet.md`](designs/2026-10-12-credit-wallet.md) |
+| 2026-10-12 | 建立本规范；免费额度维持 **¥10/天**；取消按账号的每日额度覆盖；入账统一走 `grantCredit`；消耗与入账合并进一本账 | Credit Wallet 上线，见 [`designs/2026-10-12-credit-wallet.md`](designs/2026-10-12-credit-wallet.md) |
+| 2026-10-12 | 销售倍率由"全局单一值"改为**按模型分别配置**（默认 `1.3` + `billing.modelRates` 覆盖），当前所有模型仍为 1.3 | 负责人补充：后续可能针对个别模型单独调整 |
