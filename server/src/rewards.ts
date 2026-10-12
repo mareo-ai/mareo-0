@@ -1,10 +1,10 @@
 /**
- * Earning quota by finishing a task.
+ * Earning wallet credit by finishing a task.
  *
- * The quota ledger knows nothing about ads, surveys or commissions: it records
- * that a task finished and how much it was worth. A provider decides what a
- * task is and, crucially, how completion is verified — which is why `complete`
- * is server-side only. A real ad network proves completion with a signed
+ * The wallet knows nothing about ads, surveys or commissions: it records that a
+ * task finished and how much it was worth. A provider decides what a task is
+ * and, crucially, how completion is verified — which is why `complete` is
+ * server-side only. A real ad network proves completion with a signed
  * server-to-server callback; the fake provider below accepts a task that has
  * simply been open long enough. Swapping one for the other replaces a single
  * implementation, not the ledger.
@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto'
 import type { GatewayDatabase } from './db.js'
 import { dayStamp, startOfDay } from './clock.js'
-import { grantedMicroToday } from './quota.js'
+import { grantCredit, rewardCreditMicroToday } from './wallet.js'
 import type { Settings } from './settings.js'
 
 export interface RewardOffer {
@@ -92,7 +92,7 @@ export function rewardOfferFor(
   if (amountMicro <= 0) return null
   const remainingTasks = settings.rewardDailyLimit - completedTasksToday(db, accountId, now)
   if (remainingTasks <= 0) return null
-  if (grantedMicroToday(db, accountId, now) + amountMicro > settings.dailyRewardCapMicro) return null
+  if (rewardCreditMicroToday(db, accountId, startOfDay(now)) + amountMicro > settings.dailyRewardCapMicro) return null
 
   return {
     provider: provider.id,
@@ -165,9 +165,9 @@ export function startRewardTask(
 }
 
 /**
- * Writes one ledger row. `externalId` is the provider's identifier, so the same
- * completion twice credits once; a negative amount is a reversal and is what a
- * refunded commission or a clawed-back payout looks like.
+ * Credits one finished task into the wallet. `externalId` is the provider's
+ * identifier, and the wallet's unique reference makes the same completion credit
+ * once, no matter how often the client retries.
  */
 export function creditReward(
   db: GatewayDatabase,
@@ -177,12 +177,14 @@ export function creditReward(
   amountMicro: number,
   now = new Date(),
 ): boolean {
-  const result = db
-    .prepare(
-      'INSERT OR IGNORE INTO reward_grants (grantId, accountId, provider, externalId, amountMicro, day, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    )
-    .run(`${provider}:${externalId}`, accountId, provider, externalId, amountMicro, dayStamp(now), now.toISOString())
-  return result.changes > 0
+  const { duplicated } = grantCredit(db, {
+    accountId,
+    amountMicro,
+    source: 'reward_ad',
+    externalRef: `${provider}:${externalId}`,
+    now,
+  })
+  return !duplicated
 }
 
 export type CompletionResult =
@@ -217,7 +219,7 @@ export function completeRewardTask(
 
   const capReached =
     completedTasksToday(db, accountId, now) >= settings.rewardDailyLimit ||
-    grantedMicroToday(db, accountId, now) + task.amountMicro > settings.dailyRewardCapMicro
+    rewardCreditMicroToday(db, accountId, startOfDay(now)) + task.amountMicro > settings.dailyRewardCapMicro
   if (capReached) return { ok: false, reason: 'daily-limit' }
 
   db.exec('BEGIN')

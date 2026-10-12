@@ -77,6 +77,21 @@ export function cacheHitRate(usage: TokenUsage): number | undefined {
   return usage.cacheHitTokens / usage.inputTokens
 }
 
+/**
+ * What the user is charged for one request: the real cost plus Mareo's margin.
+ * Both sides are kept so the ledger can show `margin = billable - actual`, and
+ * the billable side rounds *up* to a whole micro-yuan so the split between the
+ * free allowance and the wallet always adds up to what was charged.
+ */
+export function settleMicro(
+  actualYuan: number,
+  rate: number,
+): { actualMicro: number; billableMicro: number; marginMicro: number } {
+  const actualMicro = Math.round(actualYuan * 1_000_000)
+  const billableMicro = Math.ceil(actualMicro * rate)
+  return { actualMicro, billableMicro, marginMicro: billableMicro - actualMicro }
+}
+
 export function knownModels(): string[] {
   return Object.keys(OFF_PEAK_PRICES)
 }

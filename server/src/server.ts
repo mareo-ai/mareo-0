@@ -4,14 +4,16 @@ import { findAccountEmail, renameAccount, revokeToken, findOrCreateAccountForIde
 import { createAnonymousEventLimiter, parseEvents, recordEvents } from './events.js'
 import { beginEmailCode, isValidEmail, normalizeEmail, verifyEmailCode } from './email-auth.js'
 import { createEmailMailer, type Mailer } from './mailer.js'
-import { proxyRequest, type ProxyConfig } from './proxy.js'
+import { proxyRequest, type ProxyConfig, type ProxyOutcome } from './proxy.js'
 import { parseSessionTitleDetail, recordSessionTitle } from './session-titles.js'
 import { parseSiteView, recordSiteView } from './site-views.js'
 import { startOfDay } from './clock.js'
-import { countRequestsSince, recordUsage } from './usage.js'
+import { costOf, settleMicro } from './pricing.js'
+import { recordUsage, countRequestsSince, type UsageBilling } from './usage.js'
 import { readSponsoredAd, recordAdEvent } from './sponsored-ad.js'
-import { readSettings, type Settings } from './settings.js'
-import { quotaState } from './quota.js'
+import { readSettings, settlementRateFor, type Settings } from './settings.js'
+import { creditState, type CreditState } from './quota.js'
+import { chargeWallet } from './wallet.js'
 import { completeRewardTask, rewardOfferFor, startRewardTask } from './rewards.js'
 
 export interface GatewayOptions extends ProxyConfig {
@@ -238,57 +240,92 @@ async function handleRequest(
     return
   }
 
-  // The product quota, measured in money rather than requests. Reading the
-  // settings here keeps every number operator-tunable without a redeploy, and
-  // `off` (the default) leaves this request path byte-for-byte as it was.
+  // What the account has left: today's free allowance, then its wallet. Read
+  // before the call, because which bucket pays is decided by what was left when
+  // the request started. In `off` mode nothing is refused, but what the request
+  // cost and how it was split is still recorded.
   const settings = readSettings(options.db)
-  if (settings.quotaMode === 'enforce') {
-    const quota = quotaState(options.db, owner.userId, settings)
-    if (quota.exhausted) {
-      try {
-        recordUsage(options.db, {
-          userId: owner.userId,
-          model: null,
-          promptChars: 0,
-          completionChars: 0,
-          status: 429,
-          latencyMs: 0,
-        })
-      } catch {
-        // Recording the rejection must not change the rejection itself.
-      }
-      sendJson(response, 429, {
-        error: 'quota-exhausted',
-        message: '今天的免费额度已用完，北京时间 0 点后自动恢复。',
-        ...quotaPayload(options.db, owner.userId, settings),
+  const credit = creditState(options.db, owner.userId, settings)
+  if (settings.quotaMode === 'enforce' && credit.exhausted) {
+    try {
+      recordUsage(options.db, {
+        userId: owner.userId,
+        model: null,
+        promptChars: 0,
+        completionChars: 0,
+        status: 429,
+        latencyMs: 0,
       })
-      return
+    } catch {
+      // Recording the rejection must not change the rejection itself.
     }
+    sendJson(response, 429, {
+      error: 'credit-exhausted',
+      message: 'Mareo 余额不足，获取更多额度后即可继续。',
+      ...quotaPayload(options.db, owner.userId, settings),
+    })
+    return
   }
 
   const outcome = await proxyRequest(request, response, options)
   try {
-    recordUsage(options.db, {
-      userId: owner.userId,
-      model: outcome.model,
-      promptChars: outcome.promptChars,
-      completionChars: outcome.completionChars,
-      status: outcome.status,
-      latencyMs: outcome.latencyMs,
-      tokens: outcome.tokens,
-      sessionId: outcome.sessionId,
-      // A 200 whose usage we did not capture is recorded as missing, never as
-      // zero: an unaccounted request must not look free.
-      usageSource: outcome.status === 200 ? (outcome.tokens === undefined ? 'missing' : 'provider') : undefined,
-      requestKind: outcome.requestKind,
-    })
+    // The row and the wallet debit it may cause are one movement of money, so
+    // they land together or not at all.
+    const billing = billingFor(outcome, credit, settings)
+    options.db.exec('BEGIN')
+    try {
+      const usageId = recordUsage(options.db, {
+        userId: owner.userId,
+        model: outcome.model,
+        promptChars: outcome.promptChars,
+        completionChars: outcome.completionChars,
+        status: outcome.status,
+        latencyMs: outcome.latencyMs,
+        tokens: outcome.tokens,
+        sessionId: outcome.sessionId,
+        // A 200 whose usage we did not capture is recorded as missing, never as
+        // zero: an unaccounted request must not look free.
+        usageSource: outcome.status === 200 ? (outcome.tokens === undefined ? 'missing' : 'provider') : undefined,
+        requestKind: outcome.requestKind,
+        billing,
+      })
+      const walletPart = (billing?.billableMicro ?? 0) - (billing?.paidFromFreeMicro ?? 0)
+      if (walletPart > 0) {
+        chargeWallet(options.db, { accountId: owner.userId, amountMicro: walletPart, relatedRequestId: usageId })
+      }
+      options.db.exec('COMMIT')
+    } catch (error) {
+      options.db.exec('ROLLBACK')
+      throw error
+    }
     // The session-title call carries the title the user sees in their own list;
     // recording it is what makes "what was this session about" answerable.
     if (outcome.requestKind === 'title' && outcome.titleText !== undefined) {
       recordSessionTitle(options.db, owner.userId, outcome.sessionId ?? null, outcome.titleText, 'gateway')
     }
-  } catch {
-    // Usage accounting must never break a successful proxy exchange.
+  } catch (error) {
+    // Usage accounting must never break a successful proxy exchange — but a
+    // failure here means usage we cannot explain later, so it must be visible.
+    console.error(`[billing] ${owner.userId}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
+ * What one finished request cost and what the user is charged for it, with the
+ * free allowance covering what it can. Undefined when the provider reported no
+ * usage or the model has no price: an unpriced request is recorded as such and
+ * never billed at zero.
+ */
+function billingFor(outcome: ProxyOutcome, credit: CreditState, settings: Settings): UsageBilling | undefined {
+  if (outcome.status !== 200 || outcome.tokens === undefined) return undefined
+  const cost = costOf(outcome.tokens, outcome.model, new Date())
+  if (cost === undefined) return undefined
+  const { actualMicro, billableMicro, marginMicro } = settleMicro(cost, settlementRateFor(settings, outcome.model))
+  return {
+    actualMicro,
+    billableMicro,
+    marginMicro,
+    paidFromFreeMicro: Math.min(Math.max(credit.freeRemainingMicro, 0), billableMicro),
   }
 }
 
@@ -414,9 +451,13 @@ function displayNameForEmail(email: string): string {
 }
 
 /**
- * The meter, as the client draws it. It carries the percentage the UI shows and
- * the amounts the tests assert on; the client never does money arithmetic and
- * never displays the amounts to the user.
+ * What the client draws. `quota` keeps its original meaning — the free bucket,
+ * which is what a client that predates the wallet knows how to show — and the
+ * wallet arrives beside it for clients that display both.
+ *
+ * `exhausted` has always meant "the next request would be refused", so it stays
+ * that: a wallet with credit in it means the account is not exhausted even when
+ * the free allowance is gone.
  */
 function quotaPayload(db: GatewayDatabase, accountId: string, settings: Settings): {
   quota: {
@@ -428,19 +469,36 @@ function quotaPayload(db: GatewayDatabase, accountId: string, settings: Settings
     resetAt: string
     visible: boolean
   }
+  free: {
+    limitMicro: number
+    usedMicro: number
+    remainingMicro: number
+    resetAt: string
+  }
+  wallet: { balanceMicro: number }
+  total: { remainingMicro: number }
   reward: ReturnType<typeof rewardOfferFor>
 } {
-  const state = quotaState(db, accountId, settings)
+  const state = creditState(db, accountId, settings)
   return {
     quota: {
-      limitMicro: state.limitMicro,
-      spentMicro: state.spentMicro,
-      remainingMicro: state.remainingMicro,
-      usedPercent: state.limitMicro > 0 ? Math.min(100, Math.round((state.spentMicro / state.limitMicro) * 100)) : 100,
+      limitMicro: state.freeLimitMicro,
+      spentMicro: state.freeUsedMicro,
+      remainingMicro: state.freeRemainingMicro,
+      usedPercent:
+        state.freeLimitMicro > 0 ? Math.min(100, Math.round((state.freeUsedMicro / state.freeLimitMicro) * 100)) : 100,
       exhausted: state.exhausted,
       resetAt: state.resetAt,
       visible: state.visible,
     },
+    free: {
+      limitMicro: state.freeLimitMicro,
+      usedMicro: state.freeUsedMicro,
+      remainingMicro: state.freeRemainingMicro,
+      resetAt: state.resetAt,
+    },
+    wallet: { balanceMicro: state.walletMicro },
+    total: { remainingMicro: state.totalRemainingMicro },
     reward: rewardOfferFor(db, accountId, settings),
   }
 }

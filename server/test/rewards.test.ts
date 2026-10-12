@@ -8,8 +8,8 @@ import path from 'node:path'
 import test from 'node:test'
 import { createTokenAccount, openDatabase, type GatewayDatabase } from '../src/db.js'
 import { completeRewardTask, creditReward, rewardOfferFor, startRewardTask } from '../src/rewards.js'
-import { grantedMicroToday } from '../src/quota.js'
 import { readSettings, type Settings } from '../src/settings.js'
+import { walletBalanceMicro } from '../src/wallet.js'
 
 const directory = mkdtempSync(path.join(tmpdir(), 'mareo-rewards-'))
 const db: GatewayDatabase = openDatabase(path.join(directory, 'rewards.db'))
@@ -26,18 +26,9 @@ function newAccount(): string {
 }
 
 function settingsFor(account: string, overrides: Partial<Settings> = {}): Settings {
-  return {
-    quotaMode: 'enforce',
-    dailyFreeMicro: 10_000_000,
-    rewardAmountMicro: 1_000_000,
-    dailyRewardCapMicro: 3_000_000,
-    rewardMinSeconds: 15,
-    rewardDailyLimit: 3,
-    rewardAccounts: [account],
-    rewardProvider: 'fake-ad',
-    accountAllowances: new Map(),
-    ...overrides,
-  }
+  // Start from the real defaults so a new setting cannot silently fall out of
+  // this fixture; only what a test cares about is spelled out.
+  return { ...readSettings(db), quotaMode: 'enforce', rewardAccounts: [account], ...overrides }
 }
 
 const start = new Date('2026-09-16T02:00:00.000Z')
@@ -64,18 +55,18 @@ test('a completion is accepted only after the time the gateway itself requires',
 
   const tooSoon = completeRewardTask(db, account, task.taskId, settings, new Date(start.getTime() + 14_000))
   assert.deepEqual(tooSoon, { ok: false, reason: 'not-verified' })
-  assert.equal(grantedMicroToday(db, account, start), 0)
+  assert.equal(walletBalanceMicro(db, account), 0)
 
   const onTime = completeRewardTask(db, account, task.taskId, settings, new Date(start.getTime() + 15_000))
   assert.deepEqual(onTime, { ok: true, amountMicro: 1_000_000, duplicated: false })
-  assert.equal(grantedMicroToday(db, account, start), 1_000_000)
+  assert.equal(walletBalanceMicro(db, account), 1_000_000)
 
   // The client may retry a response it never saw; the ledger still holds one row.
   const retry = completeRewardTask(db, account, task.taskId, settings, new Date(start.getTime() + 60_000))
   assert.deepEqual(retry, { ok: true, amountMicro: 1_000_000, duplicated: true })
-  assert.equal(grantedMicroToday(db, account, start), 1_000_000)
+  assert.equal(walletBalanceMicro(db, account), 1_000_000)
   assert.equal(
-    (db.prepare('SELECT COUNT(*) AS n FROM reward_grants WHERE accountId = ?').get(account) as { n: number }).n,
+    (db.prepare("SELECT COUNT(*) AS n FROM wallet_ledger WHERE userId = ? AND source = 'reward_ad'").get(account) as { n: number }).n,
     1,
   )
 })
@@ -114,7 +105,7 @@ test('the daily count and the daily amount both cap rewards', () => {
     const done = completeRewardTask(db, account, task.taskId, settings, new Date(at.getTime() + 20_000))
     assert.equal(done.ok, true)
   }
-  assert.equal(grantedMicroToday(db, account, start), 2_000_000)
+  assert.equal(walletBalanceMicro(db, account), 2_000_000)
   const third = startRewardTask(db, account, settings, new Date(start.getTime() + 3 * 3600_000))
   assert.equal(third, null, 'the daily count is exhausted')
   assert.equal(rewardOfferFor(db, account, settings, new Date(start.getTime() + 3 * 3600_000)), null)
@@ -126,7 +117,7 @@ test('the daily amount ceiling stops a reward even when the count allows it', ()
   const first = startRewardTask(db, account, settings, start)
   assert.ok(first !== null)
   assert.equal(completeRewardTask(db, account, first.taskId, settings, new Date(start.getTime() + 20_000)).ok, true)
-  assert.equal(grantedMicroToday(db, account, start), 1_000_000)
+  assert.equal(walletBalanceMicro(db, account), 1_000_000)
   // A second reward could not be paid in full, so it is not offered at all.
   assert.equal(startRewardTask(db, account, settings, new Date(start.getTime() + 60_000)), null)
 
@@ -140,7 +131,7 @@ test('the daily amount ceiling stops a reward even when the count allows it', ()
     ok: false,
     reason: 'daily-limit',
   })
-  assert.equal(grantedMicroToday(db, account2, start), 0)
+  assert.equal(walletBalanceMicro(db, account2), 0)
 })
 
 test('yesterday\'s completions do not consume today\'s allowance', () => {
@@ -176,7 +167,7 @@ test('a task is verified by the provider that issued it, not by whatever is conf
     completeRewardTask(db, orphan, 'orphan-task', settingsFor(orphan), new Date(start.getTime() + 60_000)),
     { ok: false, reason: 'provider-mismatch' },
   )
-  assert.equal(grantedMicroToday(db, orphan, start), 0)
+  assert.equal(walletBalanceMicro(db, orphan), 0)
 })
 
 test('creditReward reports whether it actually wrote a row', () => {
@@ -185,5 +176,5 @@ test('creditReward reports whether it actually wrote a row', () => {
   assert.equal(creditReward(db, account, 'commerce', 'order-1', 500_000, start), false)
   // The same id under a different provider is a different grant.
   assert.equal(creditReward(db, account, 'campaign', 'order-1', 500_000, start), true)
-  assert.equal(grantedMicroToday(db, account, start), 1_000_000)
+  assert.equal(walletBalanceMicro(db, account), 1_000_000)
 })

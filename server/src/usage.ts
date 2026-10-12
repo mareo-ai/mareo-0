@@ -7,6 +7,15 @@ import type { TokenUsage } from './pricing.js'
  */
 export type RequestKind = 'chat' | 'title' | 'search'
 
+/** What one request cost us and what the user was charged, both in micro-yuan. */
+export interface UsageBilling {
+  actualMicro: number
+  billableMicro: number
+  marginMicro: number
+  /** The part of `billableMicro` that today's free allowance covered. */
+  paidFromFreeMicro: number
+}
+
 export interface UsageRecord {
   userId: string
   model: string | null
@@ -22,16 +31,21 @@ export interface UsageRecord {
   usageSource?: 'provider' | 'missing'
   /** 'title' for the session-title call, 'search' for web search, 'chat' otherwise. */
   requestKind?: RequestKind
+  /** Absent when the model has no known price: an unpriced request is not billed. */
+  billing?: UsageBilling
 }
 
-export function recordUsage(db: GatewayDatabase, record: UsageRecord): void {
+/** Writes the row and returns its id, which a wallet debit points back at. */
+export function recordUsage(db: GatewayDatabase, record: UsageRecord): number {
   const tokens = record.tokens
-  db.prepare(
+  const billing = record.billing
+  const result = db.prepare(
     `INSERT INTO usage (
        userId, ts, model, promptChars, completionChars, status, latencyMs,
        inputTokens, cacheHitTokens, cacheMissTokens, outputTokens, reasoningTokens,
-       sessionId, usageSource, requestKind
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       sessionId, usageSource, requestKind,
+       actualMicro, billableMicro, marginMicro, paidFromFreeMicro
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     record.userId,
     new Date().toISOString(),
@@ -48,7 +62,12 @@ export function recordUsage(db: GatewayDatabase, record: UsageRecord): void {
     record.sessionId ?? null,
     record.usageSource ?? (tokens === undefined ? null : 'provider'),
     record.requestKind ?? 'chat',
+    billing?.actualMicro ?? null,
+    billing?.billableMicro ?? null,
+    billing?.marginMicro ?? null,
+    billing?.paidFromFreeMicro ?? null,
   )
+  return Number(result.lastInsertRowid)
 }
 
 export function countRequestsSince(db: GatewayDatabase, userId: string, sinceIso: string): number {

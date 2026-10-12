@@ -51,7 +51,11 @@ CREATE TABLE IF NOT EXISTS usage (
   outputTokens INTEGER,
   reasoningTokens INTEGER,
   sessionId TEXT,
-  usageSource TEXT
+  usageSource TEXT,
+  actualMicro INTEGER,
+  billableMicro INTEGER,
+  marginMicro INTEGER,
+  paidFromFreeMicro INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS auth_codes (
@@ -147,24 +151,30 @@ CREATE TABLE IF NOT EXISTS reward_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_reward_tasks_account_time ON reward_tasks(accountId, createdAt);
 
--- The ledger: one row per credit. A reversal (refunded commission, clawed-back
--- ad payout) is a negative amount from the same provider, which is why amounts
--- are signed. externalId is the provider's own identifier and is unique per
--- provider, so a replayed completion can never credit twice.
-CREATE TABLE IF NOT EXISTS reward_grants (
-  grantId TEXT PRIMARY KEY,
-  accountId TEXT NOT NULL REFERENCES users(id),
-  provider TEXT NOT NULL,
-  externalId TEXT NOT NULL,
+-- The wallet ledger: every change to an account's Mareo Wallet, in order. The
+-- balance is the last row's balanceAfterMicro, never a separate counter that
+-- could drift from the rows. A credit carries the source it came from and the
+-- identifier that source knows it by, so a replayed purchase callback or a
+-- repeated ad completion cannot credit twice. A debit carries the usage row it
+-- paid for. Amounts are always positive; the type column says which way the
+-- money moved.
+CREATE TABLE IF NOT EXISTS wallet_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  userId TEXT NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL,
   amountMicro INTEGER NOT NULL,
-  day TEXT NOT NULL,
-  createdAt TEXT NOT NULL,
-  UNIQUE (provider, externalId)
+  source TEXT NOT NULL,
+  balanceAfterMicro INTEGER NOT NULL,
+  relatedRequestId INTEGER,
+  externalRef TEXT,
+  channel TEXT,
+  createdAt TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_reward_grants_account_day ON reward_grants(accountId, day);
+CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user ON wallet_ledger(userId, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_ledger_ref ON wallet_ledger(source, externalRef) WHERE externalRef IS NOT NULL;
 `
 
-const SCHEMA_VERSION = 8
+const SCHEMA_VERSION = 9
 
 export function openDatabase(dbPath: string): GatewayDatabase {
   mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true })
@@ -185,7 +195,7 @@ export function openDatabase(dbPath: string): GatewayDatabase {
  * are preserved so existing tokens and usage rows keep pointing at the same
  * user; token-issued users become token identities.
  */
-function addTokenColumns(db: GatewayDatabase): void {
+function addUsageColumns(db: GatewayDatabase): void {
   const columns = (db.prepare('PRAGMA table_info(usage)').all() as { name: string }[]).map((row) => row.name)
   const additions: [string, string][] = [
     ['inputTokens', 'INTEGER'],
@@ -196,6 +206,13 @@ function addTokenColumns(db: GatewayDatabase): void {
     ['sessionId', 'TEXT'],
     ['usageSource', 'TEXT'],
     ['requestKind', 'TEXT'],
+    // v9: what the request really cost and what the user was charged for it.
+    // Rows written before this arrived keep NULL, which is how the reports tell
+    // "recorded before billing existed" apart from "recorded and free".
+    ['actualMicro', 'INTEGER'],
+    ['billableMicro', 'INTEGER'],
+    ['marginMicro', 'INTEGER'],
+    ['paidFromFreeMicro', 'INTEGER'],
   ]
   for (const [name, type] of additions) {
     if (!columns.includes(name)) db.exec(`ALTER TABLE usage ADD COLUMN ${name} ${type}`)
@@ -213,7 +230,11 @@ function migrate(db: GatewayDatabase): void {
   const legacy = columns.some((column) => column.name === 'provider')
   if (!legacy) {
     db.exec(SCHEMA)
-    addTokenColumns(db)
+    addUsageColumns(db)
+    // v9: rewards credit the wallet now, and the per-account daily allowance
+    // override is gone — a special account gets wallet credit instead.
+    db.exec('DROP TABLE IF EXISTS reward_grants')
+    db.prepare("DELETE FROM settings WHERE key = 'quota.accountAllowances'").run()
     return
   }
 

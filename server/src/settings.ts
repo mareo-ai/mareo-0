@@ -10,6 +10,7 @@
  * unlimited one (which would spend without a ceiling).
  */
 import type { GatewayDatabase } from './db.js'
+import { knownModels } from './pricing.js'
 
 export type QuotaMode = 'off' | 'shadow' | 'enforce'
 
@@ -31,11 +32,16 @@ export interface Settings {
   /** Which task provider issues rewards: `fake-ad` today, an ad network later. */
   rewardProvider: string
   /**
-   * Per-account daily allowance override, in micro-yuan. The operator's own
-   * account needs headroom for testing; an ordinary account gets the default.
+   * Markup applied to the real model cost when charging a user: 1.3 charges 30%
+   * above cost. It is the fallback for every model without an override below.
    */
-  accountAllowances: Map<string, number>
+  settlementRate: number
+  /** Per-model markup overrides, keyed by a name the price table knows. */
+  modelRates: Map<string, number>
 }
+
+/** 1.3 charges the user 30% above what the model call really cost us. */
+export const DEFAULT_SETTLEMENT_RATE = 1.3
 
 const SETTING_DEFAULTS: Record<string, string> = {
   'quota.mode': 'off',
@@ -46,7 +52,8 @@ const SETTING_DEFAULTS: Record<string, string> = {
   'quota.rewardDailyLimit': '3',
   'quota.rewardAccounts': '',
   'quota.rewardProvider': 'fake-ad',
-  'quota.accountAllowances': '',
+  'billing.settlementRate': String(DEFAULT_SETTLEMENT_RATE),
+  'billing.modelRates': '',
 }
 
 /** What an operator may set, with the reason it exists. Used by the CLI's help. */
@@ -59,7 +66,8 @@ export const SETTING_KEYS: { key: string; meaning: string }[] = [
   { key: 'quota.rewardDailyLimit', meaning: '每日任务次数上限' },
   { key: 'quota.rewardAccounts', meaning: '可用奖励的账号 id，逗号分隔；空=无人可用' },
   { key: 'quota.rewardProvider', meaning: '任务来源：fake-ad（模拟）或将来接入的真实平台' },
-  { key: 'quota.accountAllowances', meaning: '按账号覆盖每日额度，格式 账号id:微元，逗号分隔' },
+  { key: 'billing.settlementRate', meaning: '默认销售倍率（1.3 = 按真实成本的 1.3 倍结算）' },
+  { key: 'billing.modelRates', meaning: '按模型覆盖倍率，格式 模型名:倍率，逗号分隔；空=全部用默认倍率' },
 ]
 
 export function readRawSettings(db: GatewayDatabase): Map<string, string> {
@@ -74,20 +82,30 @@ function wholeNumber(raw: string | undefined, fallback: number): number {
   return value
 }
 
+/** A markup rate: a positive decimal. Zero or nonsense falls back, never to free usage. */
+function positiveRate(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) return fallback
+  return value
+}
+
 /**
- * `账号id:微元` pairs. A malformed pair is dropped rather than defaulting the
- * whole map away, and an unknown account simply never matches.
+ * `模型名:倍率` pairs. A pair naming a model the price table does not know is
+ * dropped: keeping it would be dead configuration, and applying it to the
+ * default rate instead would be a price change nobody can see.
  */
-export function parseAccountAllowances(raw: string | undefined): Map<string, number> {
-  const allowances = new Map<string, number>()
+export function parseModelRates(raw: string | undefined): Map<string, number> {
+  const rates = new Map<string, number>()
+  const known = new Set(knownModels())
   for (const entry of (raw ?? '').split(',')) {
-    const [account, micro] = entry.split(':').map((part) => part.trim())
-    if (account === undefined || micro === undefined || !/^[\w-]{1,64}$/.test(account)) continue
-    const value = wholeNumber(micro, -1)
-    if (value < 0) continue
-    allowances.set(account, value)
+    const [model, rate] = entry.split(':').map((part) => part.trim())
+    if (model === undefined || rate === undefined || !known.has(model)) continue
+    const value = positiveRate(rate, -1)
+    if (value <= 0) continue
+    rates.set(model, value)
   }
-  return allowances
+  return rates
 }
 
 export function readSettings(db: GatewayDatabase): Settings {
@@ -106,8 +124,15 @@ export function readSettings(db: GatewayDatabase): Settings {
       .map((entry) => entry.trim())
       .filter((entry) => entry !== ''),
     rewardProvider: (value('quota.rewardProvider') ?? 'fake-ad').trim() || 'fake-ad',
-    accountAllowances: parseAccountAllowances(value('quota.accountAllowances')),
+    settlementRate: positiveRate(value('billing.settlementRate'), DEFAULT_SETTLEMENT_RATE),
+    modelRates: parseModelRates(value('billing.modelRates')),
   }
+}
+
+/** The markup for one model: its own rate when configured, else the default. */
+export function settlementRateFor(settings: Settings, model: string | null | undefined): number {
+  if (model === null || model === undefined) return settings.settlementRate
+  return settings.modelRates.get(model) ?? settings.settlementRate
 }
 
 /** Rejects an unknown key or an unusable value instead of storing it silently. */
@@ -127,13 +152,15 @@ function validateSetting(key: string, raw: string): string {
     }
   } else if (key === 'quota.rewardProvider') {
     if (!/^[\w-]{1,32}$/.test(value)) throw new Error(`任务来源标识格式不对：${raw}`)
-  } else if (key === 'quota.accountAllowances') {
+  } else if (key === 'billing.settlementRate') {
+    if (positiveRate(value, -1) <= 0) throw new Error(`${key} 需要大于 0 的数，收到 ${raw}`)
+  } else if (key === 'billing.modelRates') {
+    const known = knownModels()
     for (const entry of value.split(',').map((part) => part.trim()).filter((part) => part !== '')) {
-      const [account, micro] = entry.split(':').map((part) => part.trim())
-      if (account === undefined || micro === undefined || !/^[\w-]{1,64}$/.test(account)) {
-        throw new Error(`格式应为 账号id:微元，收到 ${entry}`)
-      }
-      if (wholeNumber(micro, -1) < 0) throw new Error(`${entry} 的额度需要是非负整数（微元）`)
+      const [model, rate] = entry.split(':').map((part) => part.trim())
+      if (model === undefined || rate === undefined) throw new Error(`格式应为 模型名:倍率，收到 ${entry}`)
+      if (!known.includes(model)) throw new Error(`未知模型 ${model}；可用：${known.join(', ')}`)
+      if (positiveRate(rate, -1) <= 0) throw new Error(`${entry} 的倍率需要大于 0`)
     }
   } else if (wholeNumber(value, -1) < 0) {
     throw new Error(`${key} 需要非负整数，收到 ${raw}`)

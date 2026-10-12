@@ -9,7 +9,7 @@
 // Amounts are micro-yuan: 1 元 = 1,000,000.
 import { openDatabase, type GatewayDatabase } from './db.js'
 import { readRawSettings, readSettings, SETTING_KEYS, writeSetting } from './settings.js'
-import { dailyFreeMicroFor, quotaVisible } from './quota.js'
+import { quotaVisible } from './quota.js'
 
 interface CliArguments {
   command?: string
@@ -56,16 +56,17 @@ function show(db: GatewayDatabase, account: string | undefined): void {
     'quota.rewardDailyLimit': `${effective.rewardDailyLimit} 次`,
     'quota.rewardAccounts': effective.rewardAccounts.length === 0 ? '（空：无人可用奖励）' : effective.rewardAccounts.join(', '),
     'quota.rewardProvider': effective.rewardProvider,
-    'quota.accountAllowances': effective.accountAllowances.size === 0
-      ? '（空：所有人用每日免费额度）'
-      : [...effective.accountAllowances].map(([account, micro]) => `${account} = ${yuan(micro)}`).join('；'),
+    'billing.settlementRate': `${effective.settlementRate} 倍`,
+    'billing.modelRates': effective.modelRates.size === 0
+      ? `（空：所有模型都用默认 ${effective.settlementRate} 倍）`
+      : [...effective.modelRates].map(([model, rate]) => `${model} = ${rate} 倍`).join('；'),
   }
   for (const { key, meaning } of SETTING_KEYS) {
     const source = stored.has(key) ? '已设置' : '默认值'
     console.log(`${key}\n  = ${readable[key]}   [${source}]   ${meaning}`)
   }
   if (account !== undefined) {
-    console.log(`\n账号 ${account}：每日额度 ${yuan(dailyFreeMicroFor(effective, account))}，可用奖励 ${effective.rewardAccounts.includes(account) ? '是' : '否'}，看得到额度 ${quotaVisible(effective, account) ? '是' : '否'}`)
+    console.log(`\n账号 ${account}：每日免费额度 ${yuan(effective.dailyFreeMicro)}，可用奖励 ${effective.rewardAccounts.includes(account) ? '是' : '否'}，看得到额度 ${quotaVisible(effective, account) ? '是' : '否'}`)
   }
 }
 

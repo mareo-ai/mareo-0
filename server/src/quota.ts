@@ -1,75 +1,46 @@
 /**
- * The daily quota: what an account may still spend today, measured in the same
- * unit the accounting uses (micro-yuan), so "remaining" is real money rather
- * than a request count.
+ * What an account may still spend: today's free allowance first, then the
+ * Mareo Wallet. Both sides are micro-yuan, the unit the accounting uses, so
+ * "remaining" is real money rather than a request count.
  *
- * The spent side is not a counter we maintain — it is recomputed from the usage
- * rows the gateway already stores, priced with the official price table. That
- * keeps one source of truth for money and means a pricing correction also
- * corrects the quota.
+ * Neither side is a counter we maintain. The free side is the sum of what today's
+ * requests drew from it, and the wallet side is the last ledger row — so a
+ * number in the UI can always be traced back to the rows that produced it.
  */
 import type { GatewayDatabase } from './db.js'
-import { startOfDay, dayStamp } from './clock.js'
-import { costOf } from './pricing.js'
+import { startOfDay } from './clock.js'
 import type { Settings } from './settings.js'
+import { walletBalanceMicro } from './wallet.js'
 
-export interface QuotaState {
-  /** Free allowance plus everything credited today. */
-  limitMicro: number
-  spentMicro: number
-  /** Negative is possible: the last request is allowed to overrun the quota. */
-  remainingMicro: number
+export interface CreditState {
+  /** Today's free allowance. */
+  freeLimitMicro: number
+  /** How much of today's free allowance is spent. */
+  freeUsedMicro: number
+  /** Never negative: the free bucket stops at zero. */
+  freeRemainingMicro: number
+  /** Wallet balance, which an allowed overdraft can leave below zero. */
+  walletMicro: number
+  /** Free plus wallet, which is what the user could still spend. */
+  totalRemainingMicro: number
+  /** Whether a new request would be refused: both buckets are empty. */
   exhausted: boolean
-  /** Next 00:00 Beijing, when the day (and the allowance) resets. */
+  /** Next 00:00 Beijing, when the free allowance resets. */
   resetAt: string
   /** Whether this account is meant to see the meter at all. */
   visible: boolean
 }
 
 /**
- * Real cost of the account's model calls since an instant. Rows whose usage the
- * provider did not report are skipped: an unknown cost must not be charged as
- * zero silently, and it must not block anyone either.
+ * What today's free allowance has covered. Requests recorded before billing
+ * existed carry no figure and the day they were written is the day we deployed,
+ * so the free bucket reads as refilled once — a one-day, one-off difference.
  */
-export function spentMicroSince(db: GatewayDatabase, accountId: string, sinceIso: string): number {
-  const rows = db
-    .prepare(
-      `SELECT ts, model, inputTokens, cacheHitTokens, cacheMissTokens, outputTokens
-       FROM usage WHERE userId = ? AND ts >= ? AND inputTokens IS NOT NULL`,
-    )
-    .all(accountId, sinceIso) as {
-    ts: string
-    model: string | null
-    inputTokens: number
-    cacheHitTokens: number | null
-    cacheMissTokens: number | null
-    outputTokens: number | null
-  }[]
-
-  let total = 0
-  for (const row of rows) {
-    const cost = costOf(
-      {
-        inputTokens: row.inputTokens,
-        cacheHitTokens: row.cacheHitTokens ?? 0,
-        cacheMissTokens: row.cacheMissTokens ?? 0,
-        outputTokens: row.outputTokens ?? 0,
-        reasoningTokens: 0,
-      },
-      row.model,
-      new Date(row.ts),
-    )
-    if (cost !== undefined) total += cost
-  }
-  return Math.round(total * 1_000_000)
-}
-
-/** Quota credited by completed tasks today. */
-export function grantedMicroToday(db: GatewayDatabase, accountId: string, now = new Date()): number {
+export function freeUsedMicroToday(db: GatewayDatabase, accountId: string, now = new Date()): number {
   const row = db
-    .prepare('SELECT COALESCE(SUM(amountMicro), 0) AS granted FROM reward_grants WHERE accountId = ? AND day = ?')
-    .get(accountId, dayStamp(now)) as { granted: number }
-  return row.granted
+    .prepare('SELECT COALESCE(SUM(paidFromFreeMicro), 0) AS total FROM usage WHERE userId = ? AND ts >= ?')
+    .get(accountId, startOfDay(now)) as { total: number }
+  return row.total
 }
 
 /** The next 00:00 Beijing as an instant. China has no daylight saving. */
@@ -79,7 +50,7 @@ export function nextResetAt(now = new Date()): string {
 
 /**
  * Whether this account should see the meter. In `enforce` every account does;
- * in `shadow` only the allowlist does, so an unreleased mechanism stays
+ * in `shadow` only the reward allowlist does, so an unreleased mechanism stays
  * invisible to ordinary users while it is being measured.
  */
 export function quotaVisible(settings: Settings, accountId: string): boolean {
@@ -87,28 +58,25 @@ export function quotaVisible(settings: Settings, accountId: string): boolean {
   return settings.quotaMode === 'enforce' || settings.rewardAccounts.includes(accountId)
 }
 
-/** The free allowance for one account: an override if the operator set one. */
-export function dailyFreeMicroFor(settings: Settings, accountId: string): number {
-  return settings.accountAllowances.get(accountId) ?? settings.dailyFreeMicro
-}
-
-export function quotaState(
+export function creditState(
   db: GatewayDatabase,
   accountId: string,
   settings: Settings,
   now = new Date(),
-): QuotaState {
-  const spentMicro = spentMicroSince(db, accountId, startOfDay(now))
-  const limitMicro = dailyFreeMicroFor(settings, accountId) + grantedMicroToday(db, accountId, now)
-  const remainingMicro = limitMicro - spentMicro
+): CreditState {
+  const freeUsedMicro = freeUsedMicroToday(db, accountId, now)
+  const freeRemainingMicro = Math.max(0, settings.dailyFreeMicro - freeUsedMicro)
+  const walletMicro = walletBalanceMicro(db, accountId)
   return {
-    limitMicro,
-    spentMicro,
-    remainingMicro,
-    // Blocked only once the quota is used up: a request that starts with quota
-    // left is allowed to overrun it, so the boundary is not a cliff the user
-    // cannot see coming.
-    exhausted: remainingMicro <= 0,
+    freeLimitMicro: settings.dailyFreeMicro,
+    freeUsedMicro,
+    freeRemainingMicro,
+    walletMicro,
+    totalRemainingMicro: freeRemainingMicro + Math.max(0, walletMicro),
+    // Blocked only once both buckets are empty: a request that starts with
+    // credit left is allowed to overrun it, so the boundary is not a cliff the
+    // user cannot see coming.
+    exhausted: freeRemainingMicro <= 0 && walletMicro <= 0,
     resetAt: nextResetAt(now),
     visible: quotaVisible(settings, accountId),
   }

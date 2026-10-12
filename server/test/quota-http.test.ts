@@ -112,8 +112,8 @@ test('enforce refuses with the quota in the payload and records the refusal', as
   const response = await chat()
   assert.equal(response.status, 429)
   const body = (await response.json()) as { error: string; message: string; quota: { limitMicro: number; exhausted: boolean } }
-  assert.equal(body.error, 'quota-exhausted')
-  assert.match(body.message, /0 点/)
+  assert.equal(body.error, 'credit-exhausted')
+  assert.match(body.message, /余额不足/)
   assert.equal(body.quota.exhausted, true)
   assert.equal(body.quota.limitMicro, 0)
   assert.equal(rejections(), 1)
@@ -136,10 +136,20 @@ test('the reward endpoints issue a task, refuse an early claim, then credit it',
     body: JSON.stringify({ taskId: task.taskId }),
   })
   assert.equal(done.status, 200)
-  const credited = (await done.json()) as { ok: boolean; amountMicro: number; quota: { limitMicro: number; exhausted: boolean } }
+  const credited = (await done.json()) as {
+    ok: boolean
+    amountMicro: number
+    quota: { exhausted: boolean }
+    free: { limitMicro: number; remainingMicro: number }
+    wallet: { balanceMicro: number }
+    total: { remainingMicro: number }
+  }
   assert.equal(credited.ok, true)
   assert.equal(credited.amountMicro, 2_000_000)
-  assert.equal(credited.quota.limitMicro, 2_000_000, 'the credit joins the day\'s allowance')
+  // A reward is wallet credit, not a bigger free allowance.
+  assert.equal(credited.free.limitMicro, 0)
+  assert.equal(credited.wallet.balanceMicro, 2_000_000, 'the credit joins the wallet')
+  assert.equal(credited.total.remainingMicro, 2_000_000)
   assert.equal(credited.quota.exhausted, false, 'and it unblocks the account')
 
   // A second claim for the same task is a no-op, not a second credit.
