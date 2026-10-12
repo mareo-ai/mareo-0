@@ -76,7 +76,7 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 - **部署网关代码**：服务器上**没有 git**。流程是 `rsync server/src/` → `docker compose build gateway` → 构建成功后再 `docker compose up -d gateway`（会重建容器，掐断进行中的流式响应，挑低峰做）。改完先备份：`cp -a src src.bak-<时间戳>`。
 - **运行时配置**：`config-cli.js list|set|unset`，值写在 `settings` 表，下一个请求生效。金额单位**微元**（1 元 = 1_000_000）。
 - **数据位置**：ECS `/srv/mareo/server/deploy/data/mareo.db`（compose 目录 `/srv/mareo/server/deploy`）。
-- **临时账号探针的清理顺序**（有外键，顺序错了删不掉）：`usage` → `tokens` → `identities` → `ad_events` → `reward_tasks`/`reward_grants` → `users`。
+- **临时账号探针的清理顺序**（有外键，顺序错了删不掉）：`usage` → `wallet_ledger` → `tokens` → `identities` → `ad_events` → `reward_tasks` → `users`。（`reward_grants` 已在 schema v9 删除。）
 - **绝不要 `ORDER BY id DESC` 去猜账号**：`users.id` 是 UUID，排序没有意义。账号 id 从 `issue-token` 的 stderr 里解析。
 
 ### 已经踩过的坑（别重复踩）

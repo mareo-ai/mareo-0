@@ -157,7 +157,7 @@ DB_PATH=/path/to/mareo.db npm run --prefix server cost -- --bill 2026-09-16=12.3
 |---|---|---|---|
 | 请求数上限 | `DAILY_LIMIT` | **0（已关闭）** | 代码默认 2000。>0 时超过即拒绝（记一条 `usage.status=429`）并返回中文说明。**2026-09-21 起设为 0**：成本已由额度线按钱管住，这条护栏反而会挡住合法的重度使用者——当时 `lch` 一天 2000+ 次请求、只花 ¥11，却因为撞到请求数被拒了 385 次 |
 | 告警线 | `DAILY_WARN_LIMIT` | 500 | **只**在网关日志打一条 `[usage] <accountId> reached N requests today`，并在运营页"用量异常"一行列出该账户。不拦截任何请求 |
-| 产品配额 | `quota.*`（见下节） | `enforce`，¥10/天 | 按**真实成本**扣，用完即拒绝 |
+| 产品配额 | `quota.*`（见下节） | `enforce`，¥10/天 + Wallet | 按**结算成本**扣（先免费额度、后 Wallet），两桶都空才拒绝（`error=credit-exhausted`） |
 
 改 `.env` 里的值后**必须 `docker compose up -d`**：`docker compose restart` 不会重读 `.env`，改了等于没改（重建容器会断掉当时进行中的流式响应，挑低峰做）。
 
@@ -165,25 +165,26 @@ DB_PATH=/path/to/mareo.db npm run --prefix server cost -- --bill 2026-09-16=12.3
 
 > 现实提醒：客户端每轮请求体会携带 1–3MB 上下文（`usage.promptChars` 实测中位数约 130 万字符），所以"不限量"并不是零成本。每次请求的真实花费按 token 计（见上文成本核算），额度线就是据此设的。
 
-## 每日免费额度
+## 每日免费额度与 Mareo Wallet
 
-额度是**产品线**（用完了今天就不能再用），与上面的护栏是两件事，两条都保留。
+额度是**产品线**（用完了今天就不能再用），与上面的护栏是两件事，两条都保留。v9 起额度分成**两个桶**：每日免费额度（会重置）与 Mareo Wallet（不清零、不过期）。完整口径见 [`money/standard.md`](money/standard.md)——本节只讲怎么操作。
 
 **口径（定了就别改，改之前先想清楚）**
 
-- 额度按**真实成本**扣，单位是元（内部用微元，1 元 = 1000000）。不是按请求次数：一次长上下文请求和一次问候成本差几十倍。
-- 额度池 = **当日免费额度 + 当日任务入账**。进度条的分母就是这个池子，所以完成任务后分母变大、进度条回退一截。
-- **北京时间 0 点重置**。入账也是当日有效，不跨天累积。
-- **允许最后一次透支**：只要余额 > 0 就放行，这一笔可以扣成负数；之后再请求才拒绝。所以边界不是悬崖。
-- 计入额度的是**一切产生成本的模型调用**（含会话标题那种系统自带调用）。上游没返回 usage 的请求不计（成本未知，不能按 0 计，也不该因此拦人）。
+- 两个桶都按**结算成本**扣（真实成本 × 该模型销售倍率，向上取整到微元），单位是元（内部用微元，1 元 = 1000000）。不是按请求次数：一次长上下文请求和一次问候成本差几十倍。
+- **先扣每日免费额度，后扣 Wallet**，一笔请求可以跨桶（免费部分付不完的由 Wallet 付）。
+- **每日免费额度北京时间 0 点重置**；Wallet 不重置、不过期，唯一来源是账本（`grantCredit`），**充值 ≠ 收入**。
+- **允许最后一次透支**：只要两桶还有一分钱就放行，这一笔可以把 Wallet 扣成负数；之后再请求才拒绝。所以边界不是悬崖。
+- 计入额度的是**一切产生成本的模型调用**（含会话标题那种系统自带调用，以及联网搜索）。上游没返回 usage 的请求不计（成本未知，不能按 0 计，也不该因此拦人）。
+- 用户只看到人民币金额；token 数、上游单价、销售倍率、毛利都不出现在客户端。
 
 **三种模式**
 
-| `quota.mode` | 谁看到进度条 | 谁会被拦 | 用途 |
+| `quota.mode` | 谁看到额度条 | 谁会被拦 | 用途 |
 |---|---|---|---|
-| `off`（默认） | 没人 | 没人 | 网关行为与上线前逐字节一致 |
-| `shadow` | 只有 `quota.rewardAccounts` 里的账号 | 没人 | 观察期：只让内部账号看到进度条 |
-| `enforce` | 所有人 | 超过额度的人 | 正式生效；任务入口仍只对白名单开放 |
+| `off`（默认） | 没人 | 没人 | 网关行为与上线前一致（但仍如实记账） |
+| `shadow` | 只有 `quota.rewardAccounts` 里的账号 | 没人 | 观察期：只让内部账号看到额度条 |
+| `enforce` | 所有人 | 两桶都空的人 | 正式生效；任务入口仍只对白名单开放 |
 
 **服务端可配置（改完免重启）**
 
@@ -193,17 +194,31 @@ docker compose exec -T gateway node dist/src/config-cli.js < /dev/null          
 docker compose exec -T gateway node dist/src/config-cli.js set quota.mode shadow < /dev/null
 docker compose exec -T gateway node dist/src/config-cli.js set quota.dailyFreeMicro 10000000 < /dev/null
 docker compose exec -T gateway node dist/src/config-cli.js set quota.rewardAccounts <账号id> < /dev/null
+docker compose exec -T gateway node dist/src/config-cli.js set billing.settlementRate 1.3 < /dev/null
+docker compose exec -T gateway node dist/src/config-cli.js set billing.modelRates deepseek-v4-pro:1.5 < /dev/null
 ```
 
-键：`quota.mode`、`quota.dailyFreeMicro`、`quota.rewardAmountMicro`、`quota.dailyRewardCapMicro`、`quota.rewardMinSeconds`、`quota.rewardDailyLimit`、`quota.rewardAccounts`、`quota.rewardProvider`、`quota.accountAllowances`（按账号覆盖每日额度，格式 `账号id:微元`，逗号分隔——给某个账号单独放宽额度时用它，而不是改全站默认值）。金额一律微元（¥10 = `10000000`）。配置存在 `settings` 表里，下一个请求立即生效。**值写错会回落到默认值**（不会变成 0 把所有账号锁死）。
+键：`quota.mode`、`quota.dailyFreeMicro`、`quota.rewardAmountMicro`、`quota.dailyRewardCapMicro`、`quota.rewardMinSeconds`、`quota.rewardDailyLimit`、`quota.rewardAccounts`、`quota.rewardProvider`、`billing.settlementRate`（默认销售倍率，当前 `1.3`）、`billing.modelRates`（按模型覆盖倍率，格式 `模型名:倍率`，逗号分隔，键必须在价目表里，写错会被拒绝）。金额一律微元（¥10 = `10000000`）。配置存在 `settings` 表里，下一个请求立即生效。**值写错会回落到默认值**（不会变成 0 把所有账号锁死）。
 
-> 容器内一律直接调 `node dist/src/<脚本>.js`（`config-cli`、`cost-report`、`metrics`）：镜像只装了构建产物，`npm prune --omit=dev` 已经删掉 `tsc`，所以 `npm run config` / `cost` / `metrics` 这些会先 `npm run build` 的脚本在容器里**必然失败**——它们是给本地开发用的。
+**给账号加钱（唯一的入账入口）**
+
+```sh
+docker compose exec -T gateway node dist/src/credit-cli.js --account 1305d9ac --amount-yuan 100 --source manual --ref TICKET-123 < /dev/null
+docker compose exec -T gateway node dist/src/credit-cli.js balance --account 1305d9ac < /dev/null
+docker compose exec -T gateway node dist/src/credit-cli.js list --account 1305d9ac --limit 20 < /dev/null
+```
+
+`--source` 取 `purchase / invite / reward_ad / promotion / affiliate / manual`；带 `--ref` 时同一来源同一引用只会入账一次（幂等），充值务必带订单号（`--ref`）与渠道（`--channel`）。账号可以用 id 前缀或昵称。**不提供改余额的命令**：余额永远等于账本最后一条，冲正就再写一笔 `manual` 入账（或按需新增负向来源）。
+
+> v9 起 `quota.accountAllowances`（按账号覆盖每日额度）已删除：给特殊账号放宽额度**改为给它入账 Wallet**，这样既不用改全站默认值，也不会每天被重置。
+
+> 容器内一律直接调 `node dist/src/<脚本>.js`（`config-cli`、`credit-cli`、`cost-report`、`metrics`）：镜像只装了构建产物，`npm prune --omit=dev` 已经删掉 `tsc`，所以 `npm run config` / `cost` / `metrics` 这些会先 `npm run build` 的脚本在容器里**必然失败**——它们是给本地开发用的。
 >
 > 注意：容器里跑命令一定要带 `< /dev/null`，否则 `docker compose exec` 会吃掉脚本自己的 stdin。
 
 **影子观察怎么读**
 
-成本报表的「额度影响」区块直接给出结论，不需要额外埋点——它用当天真实的计价行重算"如果当时就限量会怎样"：
+成本报表的「额度影响」区块直接给出结论，不需要额外埋点——它用当天真实的**结算成本**重算"如果当时就限量会怎样"，与真实拦截同一口径：
 
 ```
 阈值        会被挡账号   会被挡请求   占总请求   超出阈值的成本
@@ -214,9 +229,11 @@ docker compose exec -T gateway node dist/src/config-cli.js set quota.rewardAccou
 
 看三件事：**会被挡的账号数**（决定会不会得罪人）、**会被挡的请求占比**（决定拦住多少使用）、**超出阈值的成本**（决定省了多少钱）。跑几天再定免费额度。
 
+报表还会打「钱包与毛利」分节（充值/奖励/已消耗/余额/真实成本/结算成本/毛利/免费额度真实成本），以及按模型的毛利拆分——**充值不是收入，毛利只按已消耗口径算**，详见 `money/standard.md` 第 7 节。
+
 **任务（奖励）机制：有接口，暂时没有界面**
 
-服务端已经能通过"完成任务"给账号加额度，provider 抽象把"广告"和"额度"解耦了；假 provider `fake-ad` 只校验"任务开始后过了足够时间"，用来跑通链路。**界面上目前完全不出现**——额度用完就是等到 0 点，不做任何引导。接真实供给（激励视频 / 电商佣金 / 问卷）时只换 provider 实现，账本与额度逻辑不动。
+服务端已经能通过"完成任务"给账号的 **Wallet** 入账（`grantCredit(..., source='reward_ad')`，同一任务幂等），provider 抽象把"广告"和"额度"解耦了；假 provider `fake-ad` 只校验"任务开始后过了足够时间"，用来跑通链路。**界面上目前完全不出现**——两桶都用完时客户端只提示"额度已用完 · 获取更多额度"，不做引导。接真实供给（激励视频 / 电商佣金 / 问卷）时只换 provider 实现，账本与额度逻辑不动。
 
 没有界面时怎么验证（在服务器上，替换 `<token>`）：
 
@@ -230,11 +247,11 @@ docker compose exec -T gateway sh -c '
 
 演练时的收尾（做完必做）：`quota.dailyFreeMicro` 调回真实值 → `quota.rewardAccounts` 清空 → `quota.mode` 回到 `shadow` 或 `off`。
 
-**上线顺序**：`off` → `shadow`（观察真实分布，决定额度数值）→ 白名单内 `enforce` 验证 → 全量 `enforce`。
+**上线顺序**：`off` → `shadow`（观察真实分布，决定额度数值）→ 白名单内 `enforce` 验证 → 全量 `enforce`。v9（钱包与结算）上线时先跑迁移、再看影子期的对账（每人每日 `SUM(billableMicro)` 与真实成本、余额 = 入账 − 消耗、结算 − 真实 = 毛利），内部账号 `enforce` 无误后再全量。
 
-> 删除账号时要一并删除 `reward_tasks`、`reward_grants`（和广告的 `ad_events`）——这三张表都以 `users(id)` 为外键，漏删会删不掉账号本身。
+> 删除账号时要一并删除 `wallet_ledger`、`reward_tasks`（和广告的 `ad_events`）——这三张表都以 `users(id)` 为外键，漏删会删不掉账号本身。（`reward_grants` 已在 v9 删除，账本取而代之。）
 
-> 已知取舍：每次模型请求都会当天重算一遍该账号已花费的成本（几毫秒，几千行以内）。这样"已花多少"永远等于账本上的钱，不需要额外维护一个可能算错的计数器。真实用量涨到明显影响延迟时再考虑加缓存。
+> 已知取舍：每次模型请求都会当天重算一遍该账号已花费的成本（几毫秒，几千行以内）。这样"已花多少"永远等于 `usage` 的结算列，不需要额外维护一个可能算错的计数器。Wallet 余额同理，永远是账本最后一条。真实用量涨到明显影响延迟时再考虑加缓存。
 
 ## 节奏
 
