@@ -85,6 +85,21 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
     { id: 'ui-brand-official', disabled: true },
     // Mareo owns provider credentials; keep the separate chat model picker.
     { id: 'ui-settings-models', disabled: true },
+    // DSH 0.2 grew a DeepSeek account of its own. Signing in there would send
+    // model calls straight to DeepSeek, past the gateway that bills and limits
+    // them, so the whole account surface stays off.
+    { id: 'ui-settings-account', disabled: true },
+    { id: 'llm-deepseek-account', disabled: true },
+    { id: 'deepseek-account', disabled: true },
+    // A plugin manager and a config editor would let users change the very
+    // pieces we rely on (billing path, brand, meter) — support we cannot take on.
+    { id: 'ui-plugin-manager', disabled: true },
+    { id: 'plugin-manager', disabled: true },
+    { id: 'tool-plugin-manager', disabled: true },
+    { id: 'config-editor', disabled: true },
+    // Web search is billed through the gateway; a settings page that points it
+    // somewhere else would move that traffic outside the ledger.
+    { id: 'ui-settings-web-search', disabled: true },
     { insert: [{ id: 'mareo-brand', name: pathToFileURL(path.join(options.runtimeDirectory, 'node_modules', 'mareo-brand', 'index.js')).href }] },
   ]))
   await mkdir(path.dirname(options.logFile), { recursive: true })

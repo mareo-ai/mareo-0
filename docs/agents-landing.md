@@ -103,7 +103,7 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 | 线上额度配置 | `quota.mode=enforce`、默认 **¥10/天**；`quota.accountAllowances` 已随 v9 迁移删除（`1305d9ac`、`f9086e44` 都回到 ¥10/天）。要给某账号放宽额度就给它入账 Wallet（`credit-cli`） |
 | 线上请求闸门 | `DAILY_LIMIT=0`（已关闭请求次数上限）、`DAILY_WARN_LIMIT=500` |
 | 数据库 | 线上 schema **9**（45 个账号，约 6.7 万行 usage）；迁移前的备份 `deploy/backups/mareo-20261013-020427.db`，旧代码 `deploy/src.bak-20261013-020426` |
-| 运行时钉版 | `@deepseek-ai/dsh 0.1.5-rc.2` |
+| 运行时钉版 | `@deepseek-ai/dsh 0.2.0-rc.2`（已升级到 main，**待客户端发版**；线上 0.1.9 里带的仍是 `0.1.5-rc.2`）。升级前提与验收见 `docs/dsh-upgrade.md` |
 
 ### 已知问题（按影响排序）
 

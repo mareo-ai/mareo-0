@@ -124,9 +124,30 @@ test('starts from an address the engine announces on stderr', async () => {
     started = await startDshRuntime({ ...runtime.options, onUnexpectedExit: () => {} })
     assert.match(started.url, /^http:\/\/127\.0\.0\.1:\d+\/\?token=stderr-secret$/)
     assert.equal(started.origin, new URL(started.url).origin)
-    const patch = JSON.parse(readFileSync(path.join(runtime.options.dshHome, 'mareo-brand.patch.json'), 'utf8')) as { id?: string; disabled?: boolean }[]
+    const patch = JSON.parse(readFileSync(path.join(runtime.options.dshHome, 'mareo-brand.patch.json'), 'utf8')) as {
+      id?: string
+      disabled?: boolean
+      insert?: { id?: string }[]
+    }[]
     assert.ok(patch.some((entry) => entry.id === 'ui-settings-models' && entry.disabled === true))
     assert.ok(!patch.some((entry) => entry.id === 'ui-model-selection' && entry.disabled === true))
+    // DSH 0.2 brought surfaces that would take money or support out of Mareo's
+    // hands: a DeepSeek account that bypasses the gateway, a plugin manager, a
+    // config editor, and a web-search endpoint setting. Each one has to stay off.
+    for (const id of [
+      'ui-brand-official',
+      'ui-settings-account',
+      'llm-deepseek-account',
+      'deepseek-account',
+      'ui-plugin-manager',
+      'plugin-manager',
+      'tool-plugin-manager',
+      'config-editor',
+      'ui-settings-web-search',
+    ]) {
+      assert.ok(patch.some((entry) => entry.id === id && entry.disabled === true), `${id} must be disabled`)
+    }
+    assert.ok(patch.some((entry) => entry.insert?.some((plugin) => plugin.id === 'mareo-brand')), 'mareo-brand must be injected')
   } finally {
     await started?.stop()
     runtime.cleanup()
