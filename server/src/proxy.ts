@@ -19,6 +19,8 @@ const TITLE_INSTRUCTION = /^(?:generate the session title|session title from thi
 const TITLE_MAX_BODY_BYTES = 64 * 1024
 /** A title is a short label; anything longer is a reply, not a title. */
 const TITLE_MAX_CHARS = 200
+/** The provider's server-side web search tool: present only on search calls. */
+const WEB_SEARCH_TOOL_TYPE = 'web_search_20250305'
 
 /**
  * Recognises the session-title call structurally, never by loose substring:
@@ -36,9 +38,43 @@ export function isTitleRequest(body: Buffer): boolean {
   if (body.length === 0 || body.length > TITLE_MAX_BODY_BYTES) return false
   try {
     const parsed = JSON.parse(body.toString('utf8')) as { messages?: { content?: unknown }[] }
-    return (parsed.messages ?? []).some(
-      (message) => typeof message.content === 'string' && TITLE_INSTRUCTION.test(message.content.trimStart()),
-    )
+    return (parsed.messages ?? []).some((message) => {
+      const text = messageText(message.content)
+      return text !== undefined && TITLE_INSTRUCTION.test(text.trimStart())
+    })
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The text of one message. The OpenAI-shaped endpoint puts a string here; the
+ * Messages endpoint this harness also speaks puts a list of content blocks, so
+ * a title call would otherwise look like an ordinary chat turn.
+ */
+function messageText(content: unknown): string | undefined {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return undefined
+  const texts = content
+    .filter((block): block is { type?: unknown; text?: unknown } => typeof block === 'object' && block !== null)
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text as string)
+  return texts.length > 0 ? texts.join('') : undefined
+}
+
+/**
+ * Whether this call is the auxiliary web search rather than a chat turn. The
+ * path no longer answers that: the harness used to send search alone to the
+ * Anthropic-shaped endpoint, and now sends chat and session titles there too.
+ * What does answer it is the provider's own server tool — only the search call
+ * carries it — so the classification follows the request's meaning instead of
+ * where it happens to be routed.
+ */
+export function isSearchRequest(body: Buffer): boolean {
+  if (body.length === 0 || body.length > TITLE_MAX_BODY_BYTES) return false
+  try {
+    const parsed = JSON.parse(body.toString('utf8')) as { tools?: { type?: unknown }[] }
+    return (parsed.tools ?? []).some((tool) => tool?.type === WEB_SEARCH_TOOL_TYPE)
   } catch {
     return false
   }
@@ -62,11 +98,17 @@ export function textFromResponseTail(text: string): string | undefined {
     try {
       const json = JSON.parse(payload) as {
         choices?: { delta?: { content?: unknown }; message?: { content?: unknown } }[]
+        delta?: { text?: unknown }
+        content?: unknown
       }
       for (const choice of json.choices ?? []) {
         push(choice.delta?.content)
         push(choice.message?.content)
       }
+      // The Messages endpoint streams `content_block_delta` frames carrying
+      // `delta.text`, and answers in one body whose blocks carry `text`.
+      push(json.delta?.text)
+      push(messageText(json.content))
     } catch {
       // A frame we cannot parse is simply not part of the title.
     }
@@ -230,11 +272,9 @@ export async function proxyRequest(
   const model = modelFromBody(body)
   const sessionHeader = request.headers['x-deepseek-harness-session-id']
   const sessionId = typeof sessionHeader === 'string' && sessionHeader !== '' ? sessionHeader : null
-  // The web search provider talks to the Anthropic-compatible Messages API, which
-  // this gateway forwards on the same path; nothing else uses it, and search has
-  // its own price profile, so it gets its own kind rather than hiding in `chat`.
-  const requestKind: RequestKind =
-    request.url?.startsWith('/anthropic/') === true ? 'search' : isTitleRequest(body) ? 'title' : 'chat'
+  // Search has its own price profile, so it gets its own kind rather than hiding
+  // in `chat` — and the request body, not the path, is what says which it is.
+  const requestKind: RequestKind = isSearchRequest(body) ? 'search' : isTitleRequest(body) ? 'title' : 'chat'
 
   const upstreamUrl = new URL(request.url ?? '/', withTrailingSlash(config.upstreamBaseUrl)).toString()
   const forwardedHeaders: Record<string, string> = { authorization: `Bearer ${config.apiKey}` }

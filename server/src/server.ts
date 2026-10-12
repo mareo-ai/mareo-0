@@ -519,10 +519,18 @@ async function readJsonBody(request: IncomingMessage, maxBytes = 16 * 1024): Pro
   }
 }
 
+/**
+ * The account token a request carries. Our own client sends the `Bearer` header;
+ * the harness's Messages-shaped providers send the same token as `x-api-key`, and
+ * refusing that would turn every model call into an auth error.
+ */
 function authenticate(request: IncomingMessage, db: GatewayDatabase): TokenOwner | undefined {
   const header = request.headers.authorization
-  if (header === undefined || !header.startsWith('Bearer ')) return undefined
-  return findTokenOwner(db, hashToken(header.slice('Bearer '.length).trim()))
+  const bearer = header?.startsWith('Bearer ') === true ? header.slice('Bearer '.length).trim() : undefined
+  const apiKey = request.headers['x-api-key']
+  const token = bearer ?? (Array.isArray(apiKey) ? apiKey[0] : apiKey)
+  if (token === undefined || token === '') return undefined
+  return findTokenOwner(db, hashToken(token))
 }
 
 export function sendJson(response: ServerResponse, status: number, payload: unknown): void {

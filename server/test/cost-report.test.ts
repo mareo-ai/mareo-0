@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { createTokenAccount, openDatabase, type GatewayDatabase } from '../src/db.js'
-import { isTitleRequest, textFromResponseTail, usageFromResponseText } from '../src/proxy.js'
+import { isSearchRequest, isTitleRequest, textFromResponseTail, usageFromResponseText } from '../src/proxy.js'
 import { cacheHitRate, costOf, isPeakHour, knownModels, priceFor } from '../src/pricing.js'
 import { recordUsage } from '../src/usage.js'
 import { categoryBreakdown, dayOf, loadRows, loadSessionTitles, loadTitleFeed, parseBillArguments, perSessionCost, perUserCost, percentile, summarizeDays, tokensOf, walletAndMargin } from '../src/cost-report.js'
@@ -265,6 +265,32 @@ test('recognises the session-title call and reads the title out of the response'
   )
   assert.equal(isTitleRequest(laterMessage), true)
 
+  // Search is told apart by the provider's server tool, not by the path: the
+  // harness now sends chat and titles to the same Messages endpoint.
+  const searchBody = Buffer.from(
+    JSON.stringify({
+      model: 'deepseek-v4-flash',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Perform a web search for the query: 上海天气' }] }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+    }),
+  )
+  assert.equal(isSearchRequest(searchBody), true)
+  // A chat turn carries agent tools, not the provider's server tool.
+  assert.equal(
+    isSearchRequest(Buffer.from(JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'user', content: '你好' }] }))),
+    false,
+  )
+  // Talking about web search is not searching.
+  assert.equal(
+    isSearchRequest(
+      Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: '帮我用 web_search_20250305 搜一下' }] })),
+    ),
+    false,
+  )
+  assert.equal(isSearchRequest(Buffer.from('not json')), false)
+  assert.equal(isSearchRequest(Buffer.alloc(0)), false)
+
   const streamed =
     'data: {"choices":[{"delta":{"content":"表格"}}]}\n\n' +
     'data: {"choices":[{"delta":{"content":"数据整理"}}]}\n\n' +
@@ -274,6 +300,31 @@ test('recognises the session-title call and reads the title out of the response'
   const plain = JSON.stringify({ choices: [{ message: { content: '成本核算' } }] })
   assert.equal(textFromResponseTail(plain), '成本核算')
   assert.equal(textFromResponseTail('data: {"choices":[{"delta":{}}]}\n\n'), undefined)
+
+  // The Messages endpoint the harness now speaks: a title call arrives with its
+  // instruction in a content block, and the answer streams as `delta.text`.
+  const messagesTitle = Buffer.from(
+    JSON.stringify({
+      model: 'deepseek-flash',
+      max_tokens: 128,
+      system: 'Create a concise title for an AI coding-assistant session.',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'Generate the session title from this JSON array of human messages: ["写周报"]' }] },
+      ],
+    }),
+  )
+  assert.equal(isTitleRequest(messagesTitle), true)
+
+  const messagesStream =
+    'event: message_start\ndata: {"type":"message_start","message":{"content":[],"usage":{"input_tokens":32}}}\n\n' +
+    'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"成本"}}\n\n' +
+    'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"核算"}}\n\n' +
+    'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+  assert.equal(textFromResponseTail(messagesStream), '成本核算')
+  assert.equal(
+    textFromResponseTail(JSON.stringify({ type: 'message', content: [{ type: 'text', text: '预算整理' }] })),
+    '预算整理',
+  )
 
   // A real reply is long: it must never be stored as a title.
   const reply = '这是一段很长的回复正文。'.repeat(40)
