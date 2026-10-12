@@ -156,6 +156,50 @@ test('separates web search from chat in the accounting', async () => {
   assert.equal(lastRequestKind(userId), 'search')
 })
 
+test('a chat turn on the Messages path stays a chat, not a search', async () => {
+  const userId = findTokenOwner(db, hashToken(token))?.userId
+  assert.ok(userId !== undefined)
+
+  // The harness now sends chat and session titles to the same Messages endpoint
+  // the search provider uses, so the path must not decide the kind.
+  const response = await fetch(`${gatewayUrl}/anthropic/v1/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'deepseek-v4-flash',
+      max_tokens: 64,
+      messages: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }],
+      tools: [{ name: 'bash', description: 'Run a command', input_schema: { type: 'object' } }],
+    }),
+  })
+  assert.equal(response.status, 200)
+  assert.equal(lastRequestKind(userId), 'chat')
+})
+
+test('accepts the account token as x-api-key, the way the Messages providers send it', async () => {
+  const userId = findTokenOwner(db, hashToken(token))?.userId
+  assert.ok(userId !== undefined)
+
+  const me = await fetch(`${gatewayUrl}/me`, { headers: { 'x-api-key': token } })
+  assert.equal(me.status, 200)
+
+  const response = await fetch(`${gatewayUrl}/anthropic/v1/messages`, {
+    method: 'POST',
+    headers: { 'x-api-key': token, 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'deepseek-flash', max_tokens: 64, messages: [{ role: 'user', content: '你好' }] }),
+  })
+  assert.equal(response.status, 200)
+  assert.equal(lastRequestKind(userId), 'chat')
+
+  // An unknown key is still refused, whichever header carries it.
+  const wrong = await fetch(`${gatewayUrl}/anthropic/v1/messages`, {
+    method: 'POST',
+    headers: { 'x-api-key': 'not-a-real-token', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'user', content: '你好' }] }),
+  })
+  assert.equal(wrong.status, 401)
+})
+
 test('streams event-stream responses through', async () => {
   const response = await fetch(`${gatewayUrl}/stream`, {
     method: 'POST',

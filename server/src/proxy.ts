@@ -19,6 +19,8 @@ const TITLE_INSTRUCTION = /^(?:generate the session title|session title from thi
 const TITLE_MAX_BODY_BYTES = 64 * 1024
 /** A title is a short label; anything longer is a reply, not a title. */
 const TITLE_MAX_CHARS = 200
+/** The provider's server-side web search tool: present only on search calls. */
+const WEB_SEARCH_TOOL_TYPE = 'web_search_20250305'
 
 /**
  * Recognises the session-title call structurally, never by loose substring:
@@ -39,6 +41,24 @@ export function isTitleRequest(body: Buffer): boolean {
     return (parsed.messages ?? []).some(
       (message) => typeof message.content === 'string' && TITLE_INSTRUCTION.test(message.content.trimStart()),
     )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether this call is the auxiliary web search rather than a chat turn. The
+ * path no longer answers that: the harness used to send search alone to the
+ * Anthropic-shaped endpoint, and now sends chat and session titles there too.
+ * What does answer it is the provider's own server tool — only the search call
+ * carries it — so the classification follows the request's meaning instead of
+ * where it happens to be routed.
+ */
+export function isSearchRequest(body: Buffer): boolean {
+  if (body.length === 0 || body.length > TITLE_MAX_BODY_BYTES) return false
+  try {
+    const parsed = JSON.parse(body.toString('utf8')) as { tools?: { type?: unknown }[] }
+    return (parsed.tools ?? []).some((tool) => tool?.type === WEB_SEARCH_TOOL_TYPE)
   } catch {
     return false
   }
@@ -230,11 +250,9 @@ export async function proxyRequest(
   const model = modelFromBody(body)
   const sessionHeader = request.headers['x-deepseek-harness-session-id']
   const sessionId = typeof sessionHeader === 'string' && sessionHeader !== '' ? sessionHeader : null
-  // The web search provider talks to the Anthropic-compatible Messages API, which
-  // this gateway forwards on the same path; nothing else uses it, and search has
-  // its own price profile, so it gets its own kind rather than hiding in `chat`.
-  const requestKind: RequestKind =
-    request.url?.startsWith('/anthropic/') === true ? 'search' : isTitleRequest(body) ? 'title' : 'chat'
+  // Search has its own price profile, so it gets its own kind rather than hiding
+  // in `chat` — and the request body, not the path, is what says which it is.
+  const requestKind: RequestKind = isSearchRequest(body) ? 'search' : isTitleRequest(body) ? 'title' : 'chat'
 
   const upstreamUrl = new URL(request.url ?? '/', withTrailingSlash(config.upstreamBaseUrl)).toString()
   const forwardedHeaders: Record<string, string> = { authorization: `Bearer ${config.apiKey}` }

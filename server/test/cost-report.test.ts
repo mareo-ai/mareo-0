@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { createTokenAccount, openDatabase, type GatewayDatabase } from '../src/db.js'
-import { isTitleRequest, textFromResponseTail, usageFromResponseText } from '../src/proxy.js'
+import { isSearchRequest, isTitleRequest, textFromResponseTail, usageFromResponseText } from '../src/proxy.js'
 import { cacheHitRate, costOf, isPeakHour, knownModels, priceFor } from '../src/pricing.js'
 import { recordUsage } from '../src/usage.js'
 import { categoryBreakdown, dayOf, loadRows, loadSessionTitles, loadTitleFeed, parseBillArguments, perSessionCost, perUserCost, percentile, summarizeDays, tokensOf, walletAndMargin } from '../src/cost-report.js'
@@ -264,6 +264,32 @@ test('recognises the session-title call and reads the title out of the response'
     }),
   )
   assert.equal(isTitleRequest(laterMessage), true)
+
+  // Search is told apart by the provider's server tool, not by the path: the
+  // harness now sends chat and titles to the same Messages endpoint.
+  const searchBody = Buffer.from(
+    JSON.stringify({
+      model: 'deepseek-v4-flash',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Perform a web search for the query: 上海天气' }] }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+    }),
+  )
+  assert.equal(isSearchRequest(searchBody), true)
+  // A chat turn carries agent tools, not the provider's server tool.
+  assert.equal(
+    isSearchRequest(Buffer.from(JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'user', content: '你好' }] }))),
+    false,
+  )
+  // Talking about web search is not searching.
+  assert.equal(
+    isSearchRequest(
+      Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: '帮我用 web_search_20250305 搜一下' }] })),
+    ),
+    false,
+  )
+  assert.equal(isSearchRequest(Buffer.from('not json')), false)
+  assert.equal(isSearchRequest(Buffer.alloc(0)), false)
 
   const streamed =
     'data: {"choices":[{"delta":{"content":"表格"}}]}\n\n' +
