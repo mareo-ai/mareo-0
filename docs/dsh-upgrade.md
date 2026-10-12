@@ -149,10 +149,11 @@ DSH 带原生模块（`node-addon-require-builtin`、`sharp`、`koffi`、`pty.no
 1. **网关认证**：接受 `x-api-key: <令牌>` 等同 `Authorization: Bearer <令牌>`（加法，对 0.1.5 无影响）。
 2. **网关分类**：搜索改按**请求体内容**判别（`tools[].type === "web_search_20250305"`，两版一致），因为 0.2.0 把对话与标题也放到同一路径——否则每轮对话都会被记成"搜索"。
 3. **客户端 `src/main.ts`**：`DEEPSEEK_BASE_URL` 由 `${GATEWAY_URL}` 改为 **`${GATEWAY_URL}/anthropic`**（provider 自己会追加 `/v1/messages`）。搜索端不变。
+4. **网关的标题解析**（同一形态带来的第二处）：Messages 形态把消息文本放在 `content` 块数组里、流式回答用 `delta.text`，而 `isTitleRequest` 只认字符串、`textFromResponseTail` 只解析 `choices[]` —— 结果是标题调用被记成 `chat`、标题文本提不出来（计费不受影响，但报表的标题与分类会悄悄空掉）。两种形态现在都处理。
 
 **已验证无需改动**：流式用量解析（真实 Messages 流最后一帧 `message_delta` 带**完整** usage，不是官方 Anthropic 那种只给 output）、价目表（0.2.0 只发 `deepseek-flash` / `deepseek-v4-pro`，都在表内）、客户端 slot、inject 目标、会话头、标题提示词。
 
-**状态**：网关两处已实现并**已上线**（2026-10-13 03:07，PR #6；备份 `src.bak-20261013-030735`、`backups/mareo-20261013-030738.db`）；生产实测：`x-api-key` + Messages 路径的对话体 → 200 且记 `chat`、带搜索工具体 → 200 且记 `search`，计费列正确；上线后 12 分钟老客户端 47 笔请求全部 200。客户端那处改动在 `feat/dsh-0.2.0`（commit `a305cf7`），**待随客户端发版**。
+**状态**：网关改动已实现并**已上线**（PR #6，2026-10-13 03:07 与 03:12 两次；备份 `src.bak-20261013-030735`、`src.bak-20261013-031221`，数据库 `backups/mareo-20261013-030738.db`、`mareo-20261013-031223.db`）。**生产实测**：`x-api-key` + Messages 路径的对话体 → 200 且记 `chat`（`99 → 129`）；带搜索工具体 → 200 且记 `search`（`11807 → 15350`）；Messages 形态的标题调用 → 200 且记 `title`，标题文本正确落库（「撰写本周项目周报」，`source=gateway`）。两次上线后老客户端流量分别 47 笔 / 58 笔请求**全部 200**，nginx 无 4xx/5xx。客户端那处改动在 `feat/dsh-0.2.0`（commit `a305cf7`），**待随客户端发版**。
 
 ## 9. 待决策（与升级无关，属既有事项）
 
