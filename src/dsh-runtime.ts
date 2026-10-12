@@ -91,12 +91,15 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
     { id: 'ui-settings-account', disabled: true },
     { id: 'llm-deepseek-account', disabled: true },
     { id: 'deepseek-account', disabled: true },
-    // A plugin manager and a config editor would let users change the very
-    // pieces we rely on (billing path, brand, meter) — support we cannot take on.
+    // A plugin manager would let users change the very pieces we rely on
+    // (billing path, brand, meter) — support we cannot take on. The config
+    // editor is deliberately NOT disabled here: despite the name it is the
+    // settings store's foundation (`dsh-settings` injects `configEditor`), so
+    // turning it off leaves the settings surface pending forever — which would
+    // take our own Account section down with it.
     { id: 'ui-plugin-manager', disabled: true },
     { id: 'plugin-manager', disabled: true },
     { id: 'tool-plugin-manager', disabled: true },
-    { id: 'config-editor', disabled: true },
     // Web search is billed through the gateway; a settings page that points it
     // somewhere else would move that traffic outside the ledger.
     { id: 'ui-settings-web-search', disabled: true },
