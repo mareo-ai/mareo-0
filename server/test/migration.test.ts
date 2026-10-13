@@ -55,7 +55,7 @@ test('migrates a legacy v1 database into accounts + identities', () => {
   db = openDatabase(dbPath)
 
   const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-  assert.equal(version.user_version, 9)
+  assert.equal(version.user_version, 10)
   const identities = (db.prepare('SELECT provider, subject FROM identities ORDER BY accountId').all() as {
     provider: string
     subject: string | null

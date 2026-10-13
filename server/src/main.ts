@@ -1,4 +1,5 @@
 import { openDatabase } from './db.js'
+import { expirePendingOrders, paymentEnvFromProcess, paymentsEnabled } from './payment/orders.js'
 import { createGatewayServer } from './server.js'
 
 function envNumber(name: string, fallback: number): number {
@@ -24,12 +25,30 @@ if (apiKey === '') {
 }
 
 const db = openDatabase(dbPath)
+const payments = paymentEnvFromProcess()
 const server = createGatewayServer({ db, upstreamBaseUrl, apiKey, dailyLimit, dailyWarnLimit,
+  payments,
   sponsoredAdFile: process.env.SPONSORED_AD_FILE ?? 'data/sponsored-ad.json' })
+
+// Unpaid QR codes stop being payable. The platform still tells us when one of
+// them is paid anyway, and `confirmPayment` honours that, so this only tidies up
+// the state the client reads.
+if (payments.mode !== 'off') {
+  const expire = (): void => {
+    try {
+      expirePendingOrders(db)
+    } catch (error) {
+      console.error(`[payment] 过期订单处理失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  expire()
+  setInterval(expire, 5 * 60 * 1000).unref()
+}
 
 server.listen(port, host, () => {
   console.log(`Mareo gateway listening on http://${host}:${port}`)
   console.log(`Proxying to ${upstreamBaseUrl} with daily limit ${dailyLimit} requests per user (warn at ${dailyWarnLimit})`)
+  console.log(`Recharge: mode=${payments.mode}, 用户可见=${paymentsEnabled(payments)}`)
 })
 
 function shutdown(): void {
