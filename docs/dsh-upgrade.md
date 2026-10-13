@@ -75,11 +75,19 @@ node24 --expose-internals <dsh020>/lib/bin.js web \
 
 0.2.0 默认把下面这些打开，而我们**不能让用户看到**：
 
-| 面 | 为什么必须关 | 建议在 patch 里禁用 |
+| 面 | 为什么必须关 | 在 patch 里禁用 |
 |---|---|---|
 | DeepSeek 账号 / 凭据 | 用户可以登录自己的 DeepSeek 账号并选到走账号的模型，**绕过 Mareo 网关：不计费、不限额度**。它不是覆盖我们注入的 env 凭据，而是新增的独立 provider（`PROVIDER = "deepseek-account"`，未登录时报 `ACCOUNT_SIGN_IN_REQUIRED`） | `deepseek-account`、`llm-deepseek-account`、`ui-settings-account` |
-| 插件管理器 | 用户可装插件：我们的计费链路、品牌界面、额度条都变成用户可改的东西，支持面失控 | `plugin-manager`、`tool-plugin-manager`、`ui-plugin-manager` |
-| 搜索端点设置页 | 用户能把联网搜索指向别处，这部分调用跑出账本（现在搜索经网关计费） | `ui-settings-web-search` |
+
+**故意保留给用户的（负责人 2026-10-13 看过真实界面后定）**：
+
+| 面 | 保留的理由 |
+|---|---|
+| 插件管理器（`ui-plugin-manager` 界面 + `plugin-manager` 后端） | 用户可以在「插件」页里启用官方组合包（语音输入等），也可以停用不想要的。**它翻不掉我们的禁令**：我们的 `--patch` 在 profile 层之后应用；实测在 profile 里写 `mareo-brand: disabled` 与 `ui-settings-account: disabled: false`，最终生效仍是「品牌启用、账号禁用」。 |
+| 搜索端点设置页（`ui-settings-web-search`） | 它长在插件页里（`plugins.item` slot）。用户填**自己的 key 与端点**时，那次搜索不经过我们、也不花我们的钱，因此**不需要入账**；代价只是我们失去这部分可见性（近 7 天搜索占请求 8.4%、占成本 12%，高峰日 25%）。 |
+| `tool-plugin-manager` | 仍然禁用。它把「装插件」做成**给模型调用的工具**（AI 自己装东西，而不是由人决定）；官方默认配置里本来就是 `disabled: true`，我们额外禁一遍是双保险。 |
+
+> **有意接受的取舍**：插件页的「+ 添加插件」允许用户按 spec 安装任意组合包，带来供应链面，以及「装一个自带 key 的 provider 插件」从而绕开网关的可能。我们接受，因为①这些用户本来就能自己装 DSH；②常规路径下模型调用仍由我们注入的 base URL 与令牌决定。
 
 > ⚠️ **不要禁用 `config-editor`**（初版方案写错了，真机烟测才发现）：它的名字像"给用户改配置的编辑器"，实际是**设置服务的地基**——`dsh-settings` 的 `inject = ["configEditor", "profileContext"]`，设置值就是经它持久化的。禁掉它会让 `settings` 服务永远 pending，**连我们自己的 Account 设置区（以及将来的充值界面）一起挂掉**。烟测日志里那句 `settings … pending (waiting for service: configEditor)` 就是它。
 >
@@ -121,7 +129,8 @@ DSH 带原生模块（`node-addon-require-builtin`、`sharp`、`koffi`、`pty.no
 |---|---|
 | `npm run stage:runtime` | ✓ `Verified Node 24.20.0 and DSH 0.2.0-rc.2` |
 | `npm run verify:brand` | ✓ `Verified official plugin composition and authenticated Web boot`（新版本上品牌宿主正常起来） |
-| 10 个禁用项是否真的生效 | ✓ 用 `--dump-config --patch` 逐条断言，全部 `disabled: true`；`mareo-brand` 已注入且启用 |
+| 6 个禁用项是否真的生效 | ✓ 用 `--dump-config --patch` 逐条断言，全部 `disabled: true`；`mareo-brand` 已注入且启用；插件管理器与搜索设置页**未被禁用**（测试里也钉住了这两条，防止以后被顺手关掉） |
+| 用户改 profile 层能否覆盖我们的 patch | ✓ 实测：profile 里写 `mareo-brand: disabled` 与 `ui-settings-account: disabled: false`，composed 结果仍是「品牌启用、账号禁用」——我们的 overlay 最后应用 |
 | 客户端 slot 契约 | ✓ `sidebar.brand.mark` / `sidebar.brand.name` / `sidebar.footer.action` / `conversation.hero.brand.mark` / `shell.overlay` / `settings.section` 全部仍在（0.2.0 还多了 `sidebar.toggle.badge`） |
 | 我们 inject 的 4 个包 | ✓ renderer / sidebar / conversation / layout 都在 |
 | 测试 | ✓ `runtime/package.json` 的钉版与 patch 断言已写进 `tests/dsh-runtime.test.ts`，客户端测试 84/84 |

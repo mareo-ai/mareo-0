@@ -139,16 +139,20 @@ test('starts from an address the engine announces on stderr', async () => {
       'ui-settings-account',
       'llm-deepseek-account',
       'deepseek-account',
-      'ui-plugin-manager',
-      'plugin-manager',
       'tool-plugin-manager',
-      'ui-settings-web-search',
     ]) {
       assert.ok(patch.some((entry) => entry.id === id && entry.disabled === true), `${id} must be disabled`)
     }
     // The config editor is the settings store's foundation, not a user-facing
     // editor: disabling it leaves settings (and our Account section) pending.
     assert.ok(!patch.some((entry) => entry.id === 'config-editor'), 'config-editor must stay enabled')
+    // The plugin manager and the web-search page are deliberately left to the
+    // user: they cannot override this overlay, and the search page only ever
+    // spends the user's own credentials. Re-disabling them would take away the
+    // official bundles (voice input) people may want.
+    for (const id of ['ui-plugin-manager', 'plugin-manager', 'ui-settings-web-search']) {
+      assert.ok(!patch.some((entry) => entry.id === id), `${id} must stay available to users`)
+    }
     assert.ok(patch.some((entry) => entry.insert?.some((plugin) => plugin.id === 'mareo-brand')), 'mareo-brand must be injected')
   } finally {
     await started?.stop()
