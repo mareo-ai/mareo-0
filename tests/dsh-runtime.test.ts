@@ -139,7 +139,6 @@ test('starts from an address the engine announces on stderr', async () => {
       'ui-settings-account',
       'llm-deepseek-account',
       'deepseek-account',
-      'tool-plugin-manager',
     ]) {
       assert.ok(patch.some((entry) => entry.id === id && entry.disabled === true), `${id} must be disabled`)
     }
@@ -153,6 +152,9 @@ test('starts from an address the engine announces on stderr', async () => {
     for (const id of ['ui-plugin-manager', 'plugin-manager', 'ui-settings-web-search']) {
       assert.ok(!patch.some((entry) => entry.id === id), `${id} must stay available to users`)
     }
+    // Anything we do not have an opinion about stays exactly as DSH ships it,
+    // the agent's plugin tool included: no entry here means upstream decides.
+    assert.ok(!patch.some((entry) => entry.id === 'tool-plugin-manager'), 'leave upstream defaults alone')
     assert.ok(patch.some((entry) => entry.insert?.some((plugin) => plugin.id === 'mareo-brand')), 'mareo-brand must be injected')
   } finally {
     await started?.stop()

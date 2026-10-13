@@ -79,13 +79,15 @@ node24 --expose-internals <dsh020>/lib/bin.js web \
 |---|---|---|
 | DeepSeek 账号 / 凭据 | 用户可以登录自己的 DeepSeek 账号并选到走账号的模型，**绕过 Mareo 网关：不计费、不限额度**。它不是覆盖我们注入的 env 凭据，而是新增的独立 provider（`PROVIDER = "deepseek-account"`，未登录时报 `ACCOUNT_SIGN_IN_REQUIRED`） | `deepseek-account`、`llm-deepseek-account`、`ui-settings-account` |
 
+**总原则（负责人 2026-10-13 定）**：这个 overlay **只写我们真正有主张的条目**（品牌、账户体系、模型入口），其余一律跟随 DSH 默认；覆盖上游默认值等于在每次升级时悄悄偏离上游，不做。当前 overlay 一共只有 5 条禁用 + 1 条注入。
+
 **故意保留给用户的（负责人 2026-10-13 看过真实界面后定）**：
 
 | 面 | 保留的理由 |
 |---|---|
 | 插件管理器（`ui-plugin-manager` 界面 + `plugin-manager` 后端） | 用户可以在「插件」页里启用官方组合包（语音输入等），也可以停用不想要的。**它翻不掉我们的禁令**：我们的 `--patch` 在 profile 层之后应用；实测在 profile 里写 `mareo-brand: disabled` 与 `ui-settings-account: disabled: false`，最终生效仍是「品牌启用、账号禁用」。 |
 | 搜索端点设置页（`ui-settings-web-search`） | 它长在插件页里（`plugins.item` slot）。用户填**自己的 key 与端点**时，那次搜索不经过我们、也不花我们的钱，因此**不需要入账**；代价只是我们失去这部分可见性（近 7 天搜索占请求 8.4%、占成本 12%，高峰日 25%）。 |
-| `tool-plugin-manager` | 仍然禁用。它把「装插件」做成**给模型调用的工具**（AI 自己装东西，而不是由人决定）；官方默认配置里本来就是 `disabled: true`，我们额外禁一遍是双保险。 |
+| `tool-plugin-manager` | **不干预，跟随 DSH 默认**（当前官方默认是关的）。它把「装插件」做成给模型调用的工具；负责人 2026-10-13 定：*「如果默认就是 disabled，那就保持，我们尽可能和 DSH 保持一致」*——所以这里**不写任何条目**，将来上游改了我们也跟着。 |
 
 > **有意接受的取舍**：插件页的「+ 添加插件」允许用户按 spec 安装任意组合包，带来供应链面，以及「装一个自带 key 的 provider 插件」从而绕开网关的可能。我们接受，因为①这些用户本来就能自己装 DSH；②常规路径下模型调用仍由我们注入的 base URL 与令牌决定。
 
@@ -129,7 +131,7 @@ DSH 带原生模块（`node-addon-require-builtin`、`sharp`、`koffi`、`pty.no
 |---|---|
 | `npm run stage:runtime` | ✓ `Verified Node 24.20.0 and DSH 0.2.0-rc.2` |
 | `npm run verify:brand` | ✓ `Verified official plugin composition and authenticated Web boot`（新版本上品牌宿主正常起来） |
-| 6 个禁用项是否真的生效 | ✓ 用 `--dump-config --patch` 逐条断言，全部 `disabled: true`；`mareo-brand` 已注入且启用；插件管理器与搜索设置页**未被禁用**（测试里也钉住了这两条，防止以后被顺手关掉） |
+| 5 个禁用项是否真的生效 | ✓ 用 `--dump-config --patch` 逐条断言，全部 `disabled: true`；`mareo-brand` 已注入且启用；插件管理器与搜索设置页**未被禁用**（测试里也钉住了这两条，防止以后被顺手关掉） |
 | 用户改 profile 层能否覆盖我们的 patch | ✓ 实测：profile 里写 `mareo-brand: disabled` 与 `ui-settings-account: disabled: false`，composed 结果仍是「品牌启用、账号禁用」——我们的 overlay 最后应用 |
 | 客户端 slot 契约 | ✓ `sidebar.brand.mark` / `sidebar.brand.name` / `sidebar.footer.action` / `conversation.hero.brand.mark` / `shell.overlay` / `settings.section` 全部仍在（0.2.0 还多了 `sidebar.toggle.badge`） |
 | 我们 inject 的 4 个包 | ✓ renderer / sidebar / conversation / layout 都在 |

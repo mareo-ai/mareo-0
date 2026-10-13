@@ -98,9 +98,9 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
     // guards above, because this overlay is applied after the profile layer: a
     // profile-level edit loses to it.
     //
-    // The tool half is the exception. It would let the model install plugins on
-    // its own instead of a person deciding; upstream ships it disabled too.
-    { id: 'tool-plugin-manager', disabled: true },
+    // Everything else is left exactly as DSH ships it — the agent's plugin tool
+    // included, which upstream keeps off. Overriding a default here would mean
+    // quietly diverging from upstream on every future version.
     { insert: [{ id: 'mareo-brand', name: pathToFileURL(path.join(options.runtimeDirectory, 'node_modules', 'mareo-brand', 'index.js')).href }] },
   ]))
   await mkdir(path.dirname(options.logFile), { recursive: true })
