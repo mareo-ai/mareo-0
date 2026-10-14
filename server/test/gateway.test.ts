@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { createServer as createHttpServer, type Server } from 'node:http'
+import { createServer as createHttpServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
@@ -13,14 +13,24 @@ import { countRequestsSince } from '../src/usage.js'
 const UPSTREAM_KEY = 'sk-gateway-own-key'
 
 /** Stands in for api.deepseek.com so tests never need a real key. */
-function createStubUpstream(): Promise<{ server: Server; url: string; lastAuthorization: () => string | undefined }> {
+function createStubUpstream(): Promise<{
+  server: Server
+  url: string
+  lastAuthorization: () => string | undefined
+  lastHeaders: () => IncomingHttpHeaders
+}> {
   let lastAuthorization: string | undefined
+  let lastHeaders: IncomingHttpHeaders = {}
   const server = createHttpServer((request, response) => {
     lastAuthorization = request.headers.authorization
+    lastHeaders = request.headers
     let body = ''
     request.on('data', (chunk) => (body += chunk))
     request.on('end', () => {
-      const model = body ? (JSON.parse(body) as { model?: string }).model : undefined
+      // Only JSON bodies carry a model; a multipart upload must not throw here,
+      // or the stub never answers and the test hangs until the runner gives up.
+      const parsed = body.startsWith('{') ? (JSON.parse(body) as { model?: string }) : undefined
+      const model = parsed?.model
       if (request.url?.startsWith('/stream')) {
         response.writeHead(200, { 'content-type': 'text/event-stream' })
         response.write('data: {"delta":"first"}\n\n')
@@ -38,7 +48,7 @@ function createStubUpstream(): Promise<{ server: Server; url: string; lastAuthor
     server.listen(0, '127.0.0.1', () => {
       const address = server.address()
       if (address === null || typeof address === 'string') throw new Error('stub upstream did not bind a port')
-      resolve({ server, url: `http://127.0.0.1:${address.port}`, lastAuthorization: () => lastAuthorization })
+      resolve({ server, url: `http://127.0.0.1:${address.port}`, lastAuthorization: () => lastAuthorization, lastHeaders: () => lastHeaders })
     })
   })
 }
@@ -103,6 +113,29 @@ test('/me returns the token owner with its account id', async () => {
   const body = (await response.json()) as { displayName: string; accountId: string }
   assert.equal(body.displayName, 'E2E User')
   assert.equal(typeof body.accountId, 'string')
+})
+
+test('forwards the protocol headers an upstream feature depends on', async () => {
+  // The file API answers 400 without `anthropic-beta`, and the client retries
+  // that 400 in a loop: a gateway that drops the header breaks the feature.
+  // Its own account, so the request counts other tests assert on stay untouched.
+  const filesToken = 'gateway-files-token'
+  storeToken(db, { userId: createTokenAccount(db, '附件转发测试'), label: 'files', tokenHash: hashToken(filesToken) })
+  const response = await fetch(`${gatewayUrl}/anthropic/v1/files`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${filesToken}`,
+      'content-type': 'multipart/form-data; boundary=x',
+      'anthropic-beta': 'files-api-2025-04-14',
+      'anthropic-version': '2023-06-01',
+    },
+    body: 'body',
+  })
+  assert.equal(response.status, 200)
+  const headers = stub.lastHeaders()
+  assert.equal(headers['anthropic-beta'], 'files-api-2025-04-14')
+  assert.equal(headers['anthropic-version'], '2023-06-01')
+  assert.equal(headers['content-type'], 'multipart/form-data; boundary=x')
 })
 
 test('proxies a chat completion and records usage with the owner and model', async () => {
