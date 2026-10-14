@@ -172,3 +172,9 @@ ALIPAY_PUBLIC_KEY_PATH=secrets/alipay_public.pem
 
 密钥可以是 PEM，也可以是开放平台密钥工具给出的**不带 PEM 头的一行 base64**（服务端会自己补头）。
 
+**属主必须是容器里的用户**（`node`，uid 1000），否则容器读不到（`EACCES`）：
+
+```sh
+chown -R 1000:1000 secrets && chmod 700 secrets && chmod 600 secrets/*.pem
+```
+
