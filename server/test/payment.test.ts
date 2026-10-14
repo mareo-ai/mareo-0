@@ -10,6 +10,7 @@ import test from 'node:test'
 import { createTokenAccount, openDatabase, type GatewayDatabase } from '../src/db.js'
 import { alipayProvider, yuanToFen } from '../src/payment/alipay.js'
 import { RECHARGE_TIERS, microToFen, newOrderId, tierAmountMicro } from '../src/payment/amount.js'
+import { rechargeReport } from '../src/cost-report.js'
 import {
   confirmPayment,
   createPaymentOrder,
@@ -249,6 +250,44 @@ test('the report sees purchases as the ledger records them', async () => {
   const before = walletTotals(db)
   assert.ok(before.creditedBySource.get('purchase') !== undefined)
   assert.ok(before.creditedCountBySource.get('purchase') !== undefined)
+})
+
+test('the report counts the day: how many were opened, how many were paid', async () => {
+  const payer = newAccount()
+  const browsers = newAccount()
+  // A fixed Beijing day, so the assertions do not depend on when this runs.
+  const day = new Date('2026-10-05T05:00:00.000Z')
+  const paidOrders: string[] = []
+  for (const tier of ['t10', 't30'] as const) {
+    const created = await createPaymentOrder(db, { accountId: payer, tier, channel: 'alipay', env: fakeEnv(), now: day })
+    assert.ok(created.ok)
+    paidOrders.push(created.order.orderId)
+  }
+  // The same account twice, then a second account with a failure and a
+  // still-waiting order: the pending cap is per account, not per day.
+  const failed = await createPaymentOrder(db, { accountId: browsers, tier: 't10', channel: 'wechat', env: fakeEnv(), now: day })
+  const waiting = await createPaymentOrder(db, { accountId: browsers, tier: 't10', channel: 'alipay', env: fakeEnv(), now: day })
+  assert.ok(failed.ok && waiting.ok)
+
+  confirmPayment(db, paidOrders[0], { transactionId: 'tx-day-1', amountFen: 1000, now: day })
+  confirmPayment(db, paidOrders[1], { transactionId: 'tx-day-2', amountFen: 3000, now: day })
+  db.prepare("UPDATE payment_orders SET status = 'failed' WHERE orderId = ?").run(failed.order.orderId)
+
+  const section = rechargeReport(db, '2026-10-05')
+  assert.equal(section.orders, 4)
+  assert.equal(section.paid, 2)
+  assert.equal(section.failed, 1)
+  assert.equal(section.pending, 1)
+  assert.equal(section.cancelled, 0)
+  assert.equal(section.successRate, 2 / 3, '待支付的订单不进成功率分母')
+  assert.equal(section.topUpUsers, 1, '只有真正付过款的人算充值人数')
+  assert.deepEqual(section.byChannel, [
+    { channel: 'alipay', paid: 2, paidMicro: 40_000_000, orders: 3 },
+    { channel: 'wechat', paid: 0, paidMicro: 0, orders: 1 },
+  ])
+  // Both paid orders were confirmed at the same instant they were opened.
+  assert.equal(section.medianSeconds, 0)
+  assert.equal(rechargeReport(db, '2026-10-04').orders, 0, '别的日子是空的')
 })
 
 // --- Alipay itself -------------------------------------------------------

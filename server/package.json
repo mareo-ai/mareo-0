@@ -17,7 +17,8 @@
     "cost": "npm run build && node --env-file-if-exists=.env dist/src/cost-report.js",
     "config": "npm run build && node --env-file-if-exists=.env dist/src/config-cli.js",
     "credit": "npm run build && node --env-file-if-exists=.env dist/src/credit-cli.js",
-    "test": "npm run build && node --test dist/test/*.test.js"
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "payment": "npm run build && node --env-file-if-exists=.env dist/src/payment-cli.js"
   },
   "devDependencies": {
     "@types/node": "26.4.1",

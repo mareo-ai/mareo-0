@@ -381,6 +381,100 @@ export function walletAndMargin(db: GatewayDatabase, rows: Row[], day: string): 
   }
 }
 
+export interface RechargeSection {
+  day: string
+  /** Orders opened that day, whatever became of them. */
+  orders: number
+  byChannel: { channel: string; paid: number; paidMicro: number; orders: number }[]
+  paid: number
+  failed: number
+  cancelled: number
+  pending: number
+  /** paid / (paid + failed + cancelled), with still-pending orders left out. */
+  successRate: number | undefined
+  topUpUsers: number
+  /** Mean and P90 of paidAt − createdAt over the day's paid orders. */
+  medianSeconds: number
+  p90Seconds: number
+  /** Orders still pending and unexpired right now, from any day. */
+  stuckPending: number
+}
+
+/**
+ * The day's recharge, as `docs/money/standard.md` §7 defines it. Orders are
+ * counted on the Beijing day they were created; a payment that arrives after
+ * midnight belongs to the day it was started, which is what an operator
+ * reconciling a settlement file expects.
+ */
+export function rechargeReport(db: GatewayDatabase, day: string): RechargeSection {
+  const from = beijingDayStart(day)
+  const to = new Date(Date.parse(from) + 24 * 3600 * 1000).toISOString()
+  const orders = db
+    .prepare('SELECT provider, status, amountMicro, createdAt, paidAt FROM payment_orders WHERE createdAt >= ? AND createdAt < ?')
+    .all(from, to) as unknown as { provider: string; status: string; amountMicro: number; createdAt: string; paidAt: string | null }[]
+
+  const byChannel = new Map<string, { channel: string; paid: number; paidMicro: number; orders: number }>()
+  const users = new Set<string>()
+  const latencies: number[] = []
+  let paid = 0
+  let failed = 0
+  let cancelled = 0
+  let pending = 0
+  for (const order of orders) {
+    const entry = byChannel.get(order.provider) ?? { channel: order.provider, paid: 0, paidMicro: 0, orders: 0 }
+    entry.orders += 1
+    if (order.status === 'paid') {
+      paid += 1
+      entry.paid += 1
+      entry.paidMicro += order.amountMicro
+      if (order.paidAt !== null) latencies.push(Math.max(0, (Date.parse(order.paidAt) - Date.parse(order.createdAt)) / 1000))
+    } else if (order.status === 'failed') failed += 1
+    else if (order.status === 'cancelled') cancelled += 1
+    else pending += 1
+    byChannel.set(order.provider, entry)
+  }
+  for (const account of db
+    .prepare("SELECT DISTINCT userId FROM payment_orders WHERE createdAt >= ? AND createdAt < ? AND status = 'paid'")
+    .all(from, to) as unknown as { userId: string }[]) {
+    users.add(account.userId)
+  }
+
+  latencies.sort((left, right) => left - right)
+  const finished = paid + failed + cancelled
+  const stuck = db
+    .prepare("SELECT COUNT(*) AS n FROM payment_orders WHERE status = 'pending' AND expiresAt > ?")
+    .get(new Date().toISOString()) as { n: number }
+  return {
+    day,
+    orders: orders.length,
+    byChannel: [...byChannel.values()].sort((left, right) => right.paidMicro - left.paidMicro),
+    paid,
+    failed,
+    cancelled,
+    pending,
+    successRate: finished === 0 ? undefined : paid / finished,
+    topUpUsers: users.size,
+    medianSeconds: percentile(latencies, 0.5),
+    p90Seconds: percentile(latencies, 0.9),
+    stuckPending: stuck.n,
+  }
+}
+
+function printRecharge(section: RechargeSection): void {
+  const rate = section.successRate === undefined ? '—' : `${(section.successRate * 100).toFixed(1)}%`
+  console.log(`  充值订单          ${String(section.orders).padStart(6)} 笔  成功 ${section.paid} · 失败 ${section.failed} · 取消 ${section.cancelled} · 待支付 ${section.pending}   成功率 ${rate}`)
+  if (section.paid > 0) {
+    console.log(`  充值人数          ${String(section.topUpUsers).padStart(6)} 人`)
+    console.log(`  到账用时          中位 ${section.medianSeconds.toFixed(0)}s · P90 ${section.p90Seconds.toFixed(0)}s`)
+  }
+  for (const channel of section.byChannel) {
+    console.log(`    ${channel.channel.padEnd(7)} ${String(channel.orders).padStart(5)} 笔下单 · ${channel.paid} 笔成功 · ${moneyMicro(channel.paidMicro)}`)
+  }
+  if (section.stuckPending > 0) {
+    console.log(`  ⚠ 当前有 ${section.stuckPending} 笔待支付订单未过期（正常，但持续增长要看）`)
+  }
+}
+
 function printWalletAndMargin(section: WalletAndMargin): void {
   const rate = section.billableMicro === 0 ? '—' : `${((section.marginMicro / section.billableMicro) * 100).toFixed(1)}%`
   console.log(`\n## ${section.day} 钱包与毛利（口径见 docs/money/standard.md）`)
@@ -434,11 +528,21 @@ function main(): void {
   const rows = loadRows(db)
   const days = summarizeDays(rows)
 
-  console.log('# Mareo 成本报表（数据源：上游返回的 usage token，单价为官方人民币价）\n')
-  if (days.size === 0) {
+  // The report is about a day, and a day can hold money without holding model
+  // traffic — a top-up whose owner has not sent a request yet. So the day to
+  // report on is the newest one either source knows about.
+  const orderDays = new Set(
+    (db.prepare('SELECT createdAt FROM payment_orders').all() as unknown as { createdAt: string }[]).map((row) =>
+      dayOf(row.createdAt),
+    ),
+  )
+  const target = dayArgument ?? [...days.keys(), ...orderDays].sort().at(-1)
+  if (target === undefined) {
     console.log('暂无数据。')
     return
   }
+
+  console.log('# Mareo 成本报表（数据源：上游返回的 usage token，单价为官方人民币价）\n')
 
   console.log('日期(北京)   请求  有token  缺usage   历史   输出tok   思考tok   输入tok  命中率   成本      账单      偏差')
   for (const day of [...days.keys()].sort()) {
@@ -479,8 +583,8 @@ function main(): void {
     }
   }
 
-  const target = dayArgument ?? [...days.keys()].sort().at(-1)!
   printWalletAndMargin(walletAndMargin(db, rows, target))
+  printRecharge(rechargeReport(db, target))
   const users = perUserCost(rows, target)
   if (users.length > 0) {
     const costs = users.map((entry) => entry.cost).sort((left, right) => left - right)
