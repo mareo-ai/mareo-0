@@ -18,3 +18,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./backups:/app/backups
+      # Payment keys, read-only: the app private key never leaves this host, and
+      # the container only ever needs to read it.
+      - ./secrets:/app/secrets:ro

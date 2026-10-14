@@ -152,3 +152,23 @@ docker compose exec gateway node -e "
 - DeepSeek key 只存在于这台服务器；用户机器上只有网关 token。
 - 面向公众提供生成式 AI 服务前：完成生成式 AI/算法备案、隐私政策与用户协议；与 DeepSeek 确认代理商用边界。
 - 若日后启用微信登录：`/auth/wechat/callback` 的回调域名即本域名（需备案），网关侧按 `server/docs/wechat-login-design.md` 实现。
+
+## 支付宝充值密钥
+
+放到 `server/deploy/secrets/`（`.gitignore` 已排除，只存在于服务器）：
+
+```
+secrets/alipay_app_private.pem   # 应用私钥（chi 600），绝不外传
+secrets/alipay_public.pem        # 支付宝公钥
+```
+
+`docker-compose.yml` 把该目录以只读方式挂进容器；`.env` 里用相对路径引用：
+
+```
+ALIPAY_APP_ID=<开放平台 应用 ID>
+ALIPAY_PRIVATE_KEY_PATH=secrets/alipay_app_private.pem
+ALIPAY_PUBLIC_KEY_PATH=secrets/alipay_public.pem
+```
+
+密钥可以是 PEM，也可以是开放平台密钥工具给出的**不带 PEM 头的一行 base64**（服务端会自己补头）。
+
