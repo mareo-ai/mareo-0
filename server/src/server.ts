@@ -14,6 +14,19 @@ import { readSponsoredAd, recordAdEvent } from './sponsored-ad.js'
 import { readSettings, settlementRateFor, type Settings } from './settings.js'
 import { creditState, type CreditState } from './quota.js'
 import { chargeWallet } from './wallet.js'
+import {
+  confirmPayment,
+  createPaymentOrder,
+  paymentEnvFromProcess,
+  paymentOrder,
+  paymentsEnabled,
+  providerFor,
+  recentPaymentOrders,
+  shouldQuery,
+  type PaymentEnv,
+} from './payment/orders.js'
+import { RECHARGE_TIERS, tierAmountMicro } from './payment/amount.js'
+import { PAYMENT_CHANNELS, isPaymentChannel } from './payment/provider.js'
 import { completeRewardTask, rewardOfferFor, startRewardTask } from './rewards.js'
 
 export interface GatewayOptions extends ProxyConfig {
@@ -31,6 +44,8 @@ export interface GatewayOptions extends ProxyConfig {
   mailer?: Mailer
   /** Anonymous-event rate limiter; defaults to a per-process limiter. */
   anonymousEventLimiter?: (address: string, now?: number) => boolean
+  /** Recharge channels and credentials; defaults to what the environment says. */
+  payments?: PaymentEnv
 }
 
 export function createGatewayServer(options: GatewayOptions) {
@@ -38,6 +53,7 @@ export function createGatewayServer(options: GatewayOptions) {
   const gatewayOptions: GatewayOptions = {
     ...options,
     anonymousEventLimiter: options.anonymousEventLimiter ?? createAnonymousEventLimiter(),
+    payments: options.payments ?? paymentEnvFromProcess(),
   }
   return createServer((request, response) => {
     handleRequest(gatewayOptions, request, response, mailer).catch((error) => {
@@ -182,6 +198,24 @@ async function handleRequest(
 
   if (pathname === '/auth/providers') {
     sendJson(response, 200, { providers: ['email'] })
+    return
+  }
+
+  // Payment notifications carry no account token: the platform signs them, and
+  // that signature is the authentication. This has to sit before the gate below.
+  if (request.method === 'POST' && pathname.startsWith('/payment/notify/')) {
+    await handlePaymentNotify(options, request, response, pathname.slice('/payment/notify/'.length))
+    return
+  }
+
+  if (pathname === '/payment' || pathname.startsWith('/payment/')) {
+    response.setHeader('cache-control', 'no-store')
+    const owner = authenticate(request, options.db)
+    if (!owner) {
+      sendJson(response, 401, { error: 'invalid token' })
+      return
+    }
+    await handlePayment(options, request, response, owner.userId, pathname)
     return
   }
 
@@ -503,7 +537,7 @@ function quotaPayload(db: GatewayDatabase, accountId: string, settings: Settings
   }
 }
 
-async function readJsonBody(request: IncomingMessage, maxBytes = 16 * 1024): Promise<Record<string, unknown> | undefined> {
+async function readBody(request: IncomingMessage, maxBytes: number): Promise<Buffer | undefined> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request as AsyncIterable<Buffer>) {
@@ -511,11 +545,204 @@ async function readJsonBody(request: IncomingMessage, maxBytes = 16 * 1024): Pro
     if (size > maxBytes) return undefined
     chunks.push(chunk)
   }
+  return Buffer.concat(chunks)
+}
+
+async function readJsonBody(request: IncomingMessage, maxBytes = 16 * 1024): Promise<Record<string, unknown> | undefined> {
+  const body = await readBody(request, maxBytes)
+  if (body === undefined) return undefined
   try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
-    return parsed
+    return JSON.parse(body.toString('utf8')) as Record<string, unknown>
   } catch {
     return undefined
+  }
+}
+
+/**
+ * A payment notification, straight from the platform. The body is kept raw
+ * because its signature covers the exact bytes the platform sent — a decoded
+ * and re-encoded body would no longer verify.
+ */
+async function handlePaymentNotify(
+  options: GatewayOptions,
+  request: IncomingMessage,
+  response: ServerResponse,
+  channel: string,
+): Promise<void> {
+  const payments = options.payments ?? paymentEnvFromProcess()
+  const provider = isPaymentChannel(channel) ? providerFor(payments, channel) : undefined
+  if (provider === undefined) {
+    sendJson(response, 404, { error: 'not found' })
+    return
+  }
+  const body = await readBody(request, 64 * 1024)
+  if (body === undefined) {
+    sendPaymentNotifyFailure(response, channel)
+    return
+  }
+
+  let result: Awaited<ReturnType<typeof provider.verifyCallback>>
+  try {
+    result = await provider.verifyCallback(request.headers, body)
+  } catch (error) {
+    console.error(`[payment] ${channel} 回调校验异常：${messageFrom(error)}`)
+    sendPaymentNotifyFailure(response, channel)
+    return
+  }
+  if (result === undefined || !result.succeeded) {
+    // A real platform retries a failure answer, which is what we want when a
+    // notification arrives before its order is visible.
+    console.warn(`[payment] ${channel} 回调未通过校验，已拒绝`)
+    sendPaymentNotifyFailure(response, channel)
+    return
+  }
+
+  const order = paymentOrder(options.db, result.orderId)
+  if (order === undefined) {
+    console.warn(`[payment] ${channel} 回调指向未知订单 ${result.orderId}`)
+    sendPaymentNotifyFailure(response, channel)
+    return
+  }
+  if (order.amountFen !== result.amountFen) {
+    // Never adjust the order to match: an amount we did not ask for is a
+    // situation for a person, not for an automatic credit.
+    console.error(`[payment] 订单 ${result.orderId} 金额不符：订单 ${order.amountFen} 分，回调 ${result.amountFen} 分`)
+    sendPaymentNotifyFailure(response, channel)
+    return
+  }
+
+  const confirmed = confirmPayment(options.db, result.orderId, {
+    transactionId: result.transactionId,
+    amountFen: result.amountFen,
+    rawCallback: body.toString('utf8').slice(0, 4096),
+  })
+  if (!confirmed.ok) {
+    console.error(`[payment] 订单 ${result.orderId} 入账失败：${confirmed.error}`)
+    sendPaymentNotifyFailure(response, channel)
+    return
+  }
+  if (!confirmed.duplicated) {
+    console.log(`[payment] 订单 ${result.orderId} 已到账 ¥${(order.amountMicro / 1_000_000).toFixed(2)}（${order.provider}）`)
+  }
+  // Success has to look like success to the platform, or it keeps retrying.
+  if (channel === 'alipay') {
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    response.end('success')
+    return
+  }
+  sendJson(response, 200, { code: 'SUCCESS', message: '成功' })
+}
+
+function sendPaymentNotifyFailure(response: ServerResponse, channel: string): void {
+  if (channel === 'alipay') {
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    response.end('failure')
+    return
+  }
+  sendJson(response, 400, { code: 'FAIL', message: '校验失败' })
+}
+
+/**
+ * The recharge endpoints a signed-in client uses: what it may buy, starting an
+ * order, following it, and its own history. Amounts come from the tier table
+ * here, never from the request body.
+ */
+async function handlePayment(
+  options: GatewayOptions,
+  request: IncomingMessage,
+  response: ServerResponse,
+  accountId: string,
+  pathname: string,
+): Promise<void> {
+  const payments = options.payments ?? paymentEnvFromProcess()
+
+  if (request.method === 'GET' && pathname === '/payment/config') {
+    const channels = PAYMENT_CHANNELS.filter((channel) => providerFor(payments, channel) !== undefined)
+    sendJson(response, 200, {
+      enabled: paymentsEnabled(payments),
+      tiers: Object.keys(RECHARGE_TIERS).map((tier) => ({ tier, amountMicro: tierAmountMicro(tier) ?? 0 })),
+      channels,
+    })
+    return
+  }
+
+  if (request.method === 'POST' && pathname === '/payment/orders') {
+    const body = await readJsonBody(request, 4096)
+    const created = await createPaymentOrder(options.db, {
+      accountId,
+      tier: body?.tier,
+      channel: body?.channel,
+      env: payments,
+    })
+    if (!created.ok) {
+      sendJson(response, created.status, { error: created.error, ...(created.message === undefined ? {} : { message: created.message }) })
+      return
+    }
+    sendJson(response, 200, {
+      orderId: created.order.orderId,
+      status: created.order.status,
+      channel: created.order.provider,
+      amountMicro: created.order.amountMicro,
+      amountFen: created.order.amountFen,
+      qrSvg: created.qrSvg,
+      expiresAt: created.order.expiresAt,
+    })
+    return
+  }
+
+  if (request.method === 'GET' && pathname === '/payment/orders') {
+    const limit = Number(new URL(request.url ?? '/', 'http://gateway.local').searchParams.get('limit') ?? '20')
+    const orders = recentPaymentOrders(options.db, accountId, Number.isFinite(limit) ? limit : 20)
+    sendJson(response, 200, { orders: orders.map(publicOrder) })
+    return
+  }
+
+  const orderMatch = /^\/payment\/orders\/([A-Za-z0-9_-]{1,64})$/.exec(pathname)
+  if (request.method === 'GET' && orderMatch !== null) {
+    const order = paymentOrder(options.db, orderMatch[1])
+    if (order === undefined || order.userId !== accountId) {
+      sendJson(response, 404, { error: 'not-found' })
+      return
+    }
+    // A callback can be lost; when one seems to be, ask the platform ourselves.
+    if (shouldQuery(order)) {
+      const provider = providerFor(payments, order.provider)
+      try {
+        const remote = await provider?.queryOrder(order)
+        if (remote?.status === 'paid' && remote.transactionId !== undefined && remote.amountFen !== undefined) {
+          confirmPayment(options.db, order.orderId, { transactionId: remote.transactionId, amountFen: remote.amountFen })
+        }
+      } catch (error) {
+        console.error(`[payment] 订单 ${order.orderId} 查单失败：${messageFrom(error)}`)
+      }
+    }
+    sendJson(response, 200, publicOrder(paymentOrder(options.db, order.orderId) ?? order))
+    return
+  }
+
+  sendJson(response, 404, { error: 'not found' })
+}
+
+/** What a user may see about their own order: never a platform secret. */
+function publicOrder(order: {
+  orderId: string
+  status: string
+  provider: string
+  amountMicro: number
+  amountFen: number
+  createdAt: string
+  expiresAt: string
+  paidAt: string | null
+}): Record<string, unknown> {
+  return {
+    orderId: order.orderId,
+    status: order.status,
+    channel: order.provider,
+    amountMicro: order.amountMicro,
+    amountFen: order.amountFen,
+    createdAt: order.createdAt,
+    expiresAt: order.expiresAt,
+    paidAt: order.paidAt,
   }
 }
 

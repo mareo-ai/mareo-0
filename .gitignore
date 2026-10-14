@@ -71,6 +71,8 @@ web_modules/
 .env
 .env.*
 !.env.example
+# Payment keys live on the server only, never in the repository.
+server/deploy/secrets/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

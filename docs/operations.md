@@ -216,6 +216,40 @@ docker compose exec -T gateway node dist/src/credit-cli.js list --account 1305d9
 >
 > 注意：容器里跑命令一定要带 `< /dev/null`，否则 `docker compose exec` 会吃掉脚本自己的 stdin。
 
+**充值（微信支付 / 支付宝）**
+
+用户用真钱给 Wallet 充值。口径见 `money/standard.md` 第 8 节，设计与实现见 `money/designs/2026-10-13-recharge.md`。
+
+开关与密钥都在 `.env`（改完要 `docker compose up -d`）：
+
+| 变量 | 说明 |
+|---|---|
+| `PAYMENT_MODE` | `off`（默认，用户看不到入口）/ `fake`（模拟通道，只给内部测试）/ `live`（真实收钱） |
+| `PAYMENT_PUBLIC_BASE_URL` | 回调前缀，必须公网 HTTPS；回调地址是 `<它>/payment/notify/alipay` |
+| `ALIPAY_APP_ID` | 开放平台应用 ID |
+| `ALIPAY_PRIVATE_KEY_PATH` / `ALIPAY_PUBLIC_KEY_PATH` | 应用私钥与支付宝公钥（也可以直接写内容，路径方式更稳）。私钥权限 600 |
+| `ALIPAY_GATEWAY` | 留空即生产网关；沙箱联调时指向沙箱地址 |
+
+> `PAYMENT_MODE=live` 但缺任一配置时，该渠道会被当成"不可用"：客户端拿到的 `enabled=false`，入口不显示。所以**配置没写好不会出现一个点了没反应的按钮**。
+
+日常操作（容器内，注意 `< /dev/null`）：
+
+```sh
+docker compose exec -T gateway node dist/src/payment-cli.js list --status pending < /dev/null
+docker compose exec -T gateway node dist/src/payment-cli.js list --account <账号id或昵称> < /dev/null
+docker compose exec -T gateway node dist/src/payment-cli.js show <订单号> < /dev/null
+docker compose exec -T gateway node dist/src/payment-cli.js cancel <订单号> < /dev/null
+```
+
+**客服流程：用户说"我付了但没到账"**
+
+1. `payment-cli list --account <账号>` 找到订单号（或让用户提供订单号，客户端充值记录里有）。
+2. `show <订单号>`：若 `status=paid`，钱已到账，问题在别处；若仍 `pending`，去支付宝商户后台按**商户订单号**查这笔是否已收款。
+3. 平台已收款而订单仍 `pending`（回调丢了）：`payment-cli pay <订单号> --transaction <支付宝流水号> --amount-fen <分>`。这条走的是**和回调完全相同**的入账路径，重复执行不会重复加钱。
+4. 平台确认未收款：让用户重新扫码下单即可（旧单会自己过期）。
+
+**必须守住的两条**：金额一律由服务端按档位决定（客户端传金额无效）；只有验签通过的回调、或主动查单、或人工补单能让订单变成 `paid`，三者都经过 `confirmPayment`，幂等与一致性只在那里实现。
+
 **影子观察怎么读**
 
 成本报表的「额度影响」区块直接给出结论，不需要额外埋点——它用当天真实的**结算成本**重算"如果当时就限量会怎样"，与真实拦截同一口径：

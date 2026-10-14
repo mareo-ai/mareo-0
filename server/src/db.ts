@@ -172,9 +172,36 @@ CREATE TABLE IF NOT EXISTS wallet_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user ON wallet_ledger(userId, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_ledger_ref ON wallet_ledger(source, externalRef) WHERE externalRef IS NOT NULL;
+
+-- Recharge orders. An order is the record of one attempt to buy credit: what
+-- the user asked for, what the platform was told, and what came back. The
+-- credit itself only ever lands in the ledger above, keyed by this orderId, so
+-- a repeated payment notification cannot add money twice. The platform payment
+-- id in transactionId is unique per channel, which is what stops one payment
+-- being claimed by two orders.
+CREATE TABLE IF NOT EXISTS payment_orders (
+  orderId       TEXT PRIMARY KEY,
+  userId        TEXT NOT NULL REFERENCES users(id),
+  provider      TEXT NOT NULL,
+  amountMicro   INTEGER NOT NULL,
+  amountFen     INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  transactionId TEXT,
+  codeUrl       TEXT,
+  createdAt     TEXT NOT NULL,
+  expiresAt     TEXT NOT NULL,
+  paidAt        TEXT,
+  refundedAt    TEXT,
+  rawCallback   TEXT,
+  updatedAt     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_user ON payment_orders(userId, createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders(status, expiresAt);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_txn
+  ON payment_orders(provider, transactionId) WHERE transactionId IS NOT NULL;
 `
 
-const SCHEMA_VERSION = 9
+const SCHEMA_VERSION = 10
 
 export function openDatabase(dbPath: string): GatewayDatabase {
   mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true })
