@@ -127,7 +127,7 @@ test('the meter shows both buckets in yuan and nothing else', async () => {
   assert.doesNotMatch(text, /token/i)
 })
 
-test('an exhausted account is told it is out, and is offered nothing to buy', async () => {
+test('an exhausted account is told it is out and offered a top-up', async () => {
   const spent = { limitMicro: 10_000_000, usedMicro: 10_000_000, remainingMicro: 0, resetAt: RESET_AT }
   const harness = meterHarness(
     full({
@@ -138,11 +138,12 @@ test('an exhausted account is told it is out, and is offered nothing to buy', as
     }),
   )
   const text = JSON.stringify(await harness.render())
-  assert.match(text, /额度已用完 · 获取更多额度/)
+  assert.match(text, /额度已用完 · 去充值/)
   assert.match(text, /免费额度北京时间 0 点后恢复/)
-  // No task, no ad, no button: earning quota has no user-facing entry yet.
+  // Running out is where a top-up is most wanted, so it is the primary entry.
+  assert.match(text, /"tag":"button"/)
+  // No task, no ad, no simulated earning: the only way on is paying.
   assert.doesNotMatch(text, /模拟/)
-  assert.doesNotMatch(text, /button/)
 })
 
 test('a wallet pushed negative by an allowed overdraft reads as a debt', async () => {

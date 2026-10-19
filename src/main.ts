@@ -28,11 +28,13 @@ import { loadPreferences, savePreferences, type Preferences } from './preference
 import { readSessionTitles, unreportedTitles } from './session-titles.js'
 import { stripLocalPaths, Telemetry, type TelemetryEvent } from './telemetry.js'
 import { SponsoredAdClient } from './sponsored-ad.js'
+import { PaymentClient } from './payment.js'
 import { QuotaClient } from './quota.js'
 
 let mainWindow: BrowserWindow | undefined
 let sponsoredAd: SponsoredAdClient | undefined
 let quotaClient: QuotaClient | undefined
+let paymentClient: PaymentClient | undefined
 let dshRuntime: DshRuntime | undefined
 let shutdownComplete = false
 // The signed-in account for the current run; used by the account bridge.
@@ -236,6 +238,7 @@ async function startMareo(): Promise<void> {
       // the quota that was spent while the previous document was open.
       sponsoredAd = new SponsoredAdClient(GATEWAY_URL, account.token, (url) => shell.openExternal(url))
       quotaClient = new QuotaClient(GATEWAY_URL, account.token)
+      paymentClient = new PaymentClient(GATEWAY_URL, account.token)
     }
   })
   await mainWindow.loadFile(path.join(app.getAppPath(), 'assets', 'startup.html'))
@@ -592,6 +595,7 @@ async function returnToSignIn(): Promise<void> {
   signInActive = true
   sponsoredAd = undefined
   quotaClient = undefined
+  paymentClient = undefined
   if (dshRuntime) {
     const runtime = dshRuntime
     dshRuntime = undefined
@@ -643,6 +647,25 @@ function registerContentBridges(): void {
   // and nothing else. Earning extra quota exists server-side, but has no
   // user-facing entry until a real provider is connected.
   ipcMain.handle('mareo:quota:get', (event) => isDshSender(event) ? quotaClient?.load() ?? null : null)
+
+  // Recharge: starting a payment and following it. What may be bought and what a
+  // payment means are the gateway's decisions; this only relays them.
+  ipcMain.handle('mareo:payment:config', (event) => isDshSender(event) ? paymentClient?.config() ?? null : null)
+  ipcMain.handle('mareo:payment:create', (event, request: unknown) => {
+    if (!isDshSender(event) || paymentClient === undefined) return { ok: false, error: '支付暂未开放' }
+    const { tier, channel } = (request ?? {}) as { tier?: unknown; channel?: unknown }
+    if (typeof tier !== 'string' || (channel !== 'alipay' && channel !== 'wechat')) {
+      return { ok: false, error: '这个充值选项暂不可用' }
+    }
+    return paymentClient.createOrder(tier, channel)
+  })
+  ipcMain.handle('mareo:payment:order', (event, orderId: unknown) =>
+    isDshSender(event) && typeof orderId === 'string' ? paymentClient?.order(orderId) ?? null : null)
+  ipcMain.handle('mareo:payment:orders', (event, limit: unknown) => {
+    if (!isDshSender(event)) return []
+    const parsed = typeof limit === 'number' && Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 20) : 5
+    return paymentClient?.orders(parsed) ?? []
+  })
 }
 
 /**

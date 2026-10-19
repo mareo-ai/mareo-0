@@ -131,6 +131,7 @@ function AccountSection() {
   const [busy, setBusy] = React.useState(false)
   const [notice, setNotice] = React.useState('')
   const [telemetry, setTelemetry] = React.useState(null)
+  const [balance, setBalance] = React.useState(null)
 
   React.useEffect(() => {
     if (!window.__mareoAccount) return
@@ -144,6 +145,24 @@ function AccountSection() {
       window.__mareoTelemetry.get().then((result) => {
         if (result.ok) setTelemetry(result.enabled)
       }).catch(() => {})
+    }
+  }, [])
+
+  // The balance here is the same wallet the sidebar meter shows; a payment that
+  // just landed refreshes both through the same hook.
+  React.useEffect(() => {
+    if (!window.__mareoQuota) return
+    let active = true
+    const refresh = () => {
+      window.__mareoQuota.get().then((value) => {
+        if (active && value) setBalance(value.wallet.balanceMicro)
+      }).catch(() => {})
+    }
+    refresh()
+    quotaRefreshHooks.add(refresh)
+    return () => {
+      active = false
+      quotaRefreshHooks.delete(refresh)
     }
   }, [])
 
@@ -182,6 +201,17 @@ function AccountSection() {
   return React.createElement(
     'div',
     null,
+    React.createElement('div', { style: fieldStyle },
+      React.createElement('span', null, 'Mareo 余额'),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+        React.createElement('span', { style: { opacity: 0.8 } }, balance === null ? '—' : yuan(balance)),
+        React.createElement('button', {
+          type: 'button',
+          style: { ...buttonStyle, padding: '4px 12px' },
+          onClick: () => recharge.setOpen(true),
+        }, '充值'),
+      ),
+    ),
     React.createElement('div', { style: fieldStyle },
       React.createElement('span', null, '邮箱'),
       React.createElement('div', { style: { opacity: 0.7 } }, profile.email || '—'),
@@ -235,8 +265,27 @@ function AccountSection() {
 // gateway sends both as micro-yuan, so the client renders amounts and never
 // sees a token count, a model price or the settlement rate.
 //
-// Running out is a plain notice with no purchase entry: the wallet is topped up
-// through the account surface, not from here.
+// Running out is the moment a top-up is most wanted, so that notice is the
+// primary way into the recharge panel; the meter itself and the Account section
+// open the same panel.
+const recharge = {
+  open: false,
+  listeners: new Set(),
+  setOpen(next) {
+    recharge.open = next
+    recharge.listeners.forEach((listener) => listener(next))
+  },
+  subscribe(listener) {
+    recharge.listeners.add(listener)
+    return () => recharge.listeners.delete(listener)
+  },
+}
+
+/** The meter re-reads the gateway; a payment that just landed should not wait 30s. */
+const quotaRefreshHooks = new Set()
+function refreshQuotaNow() {
+  quotaRefreshHooks.forEach((hook) => hook())
+}
 const meterTrackStyle = {
   height: 6, borderRadius: 3, overflow: 'hidden',
   background: 'var(--dsw-alias-border-l3, #e4e7ec)',
@@ -266,9 +315,11 @@ function QuotaMeter({ wide }) {
     const timer = setInterval(refresh, 30000)
     const onFocus = () => refresh()
     window.addEventListener('focus', onFocus)
+    quotaRefreshHooks.add(refresh)
     return () => {
       active = false
       clearInterval(timer)
+      quotaRefreshHooks.delete(refresh)
       window.removeEventListener('focus', onFocus)
     }
   }, [])
@@ -282,7 +333,9 @@ function QuotaMeter({ wide }) {
     : 100
 
   return React.createElement('div', {
-    style: { display: 'grid', gap: 6, width: '100%', minWidth: 0, padding: '8px 2px 2px' },
+    style: { display: 'grid', gap: 6, width: '100%', minWidth: 0, padding: '8px 2px 2px', cursor: 'pointer' },
+    title: '点击充值 Mareo 余额',
+    onClick: () => recharge.setOpen(true),
   },
   React.createElement('div', {
     style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, lineHeight: '16px' },
@@ -309,11 +362,200 @@ function QuotaMeter({ wide }) {
     React.createElement('span', { style: { whiteSpace: 'nowrap' } }, yuan(snapshot.total.remainingMicro)),
   ),
   exhausted
-    ? React.createElement('span', { style: { fontSize: 12, opacity: 0.7 } }, '额度已用完 · 获取更多额度')
+    ? React.createElement('button', {
+      type: 'button',
+      style: {
+        fontSize: 12, lineHeight: '18px', textAlign: 'left', padding: 0, border: 'none',
+        background: 'transparent', color: 'var(--dsw-alias-accent, #3d6bfe)', cursor: 'pointer',
+      },
+      onClick: () => recharge.setOpen(true),
+    }, '额度已用完 · 去充值')
     : null,
   exhausted
     ? React.createElement('span', { style: { fontSize: 12, opacity: 0.6 } }, '免费额度北京时间 0 点后恢复。')
     : null)
+}
+
+
+// The recharge panel: choose an amount, pay by scanning a QR code, watch the
+// order until the gateway says the money arrived. The client never prices
+// anything — it sends a tier id and shows what the gateway answers — and the
+// polling stops as soon as the panel closes, so walking away costs nothing.
+const panelCardStyle = {
+  width: 340, maxWidth: '90vw', background: 'var(--dsw-alias-bg-base, #fff)', borderRadius: 12,
+  padding: '20px 20px 16px', boxShadow: '0 12px 48px rgba(0,0,0,0.18)', display: 'grid', gap: 12,
+}
+const tierButtonStyle = {
+  flex: 1, padding: '10px 0', borderRadius: 8, cursor: 'pointer', fontSize: 14,
+  border: '1px solid var(--dsw-alias-border, #d0d5dd)', background: 'transparent',
+}
+const chosenTierStyle = {
+  ...tierButtonStyle, borderColor: 'var(--dsw-alias-accent, #3d6bfe)',
+  color: 'var(--dsw-alias-accent, #3d6bfe)', fontWeight: 600,
+}
+const primaryButtonStyle = {
+  width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+  fontSize: 14, background: 'var(--dsw-alias-accent, #3d6bfe)', color: '#fff',
+}
+
+function RechargePanel() {
+  const [open, setOpen] = React.useState(recharge.open)
+  const [config, setConfig] = React.useState(null)
+  const [tier, setTier] = React.useState('t30')
+  const [channel, setChannel] = React.useState(null)
+  const [order, setOrder] = React.useState(null)
+  const [phase, setPhase] = React.useState('choose')
+  const [notice, setNotice] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+
+  React.useEffect(() => {
+    recharge.subscribe((next) => {
+      setOpen(next)
+      if (!next) {
+        setPhase('choose')
+        setOrder(null)
+        setNotice('')
+      }
+    })
+  }, [])
+
+  React.useEffect(() => {
+    if (!open || !window.__mareoPayment) return
+    let active = true
+    window.__mareoPayment.config().then((value) => {
+      if (!active || !value) return
+      setConfig(value)
+      if (value.channels.length > 0) setChannel((current) => current || value.channels[0])
+      if (!value.tiers.some((entry) => entry.tier === tier) && value.tiers.length > 0) setTier(value.tiers[0].tier)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [open])
+
+  // While an order is pending, ask the gateway about it. The gateway itself asks
+  // the platform when a notification is missing, so a lost callback still lands.
+  React.useEffect(() => {
+    if (!open || phase !== 'pay' || !order || !window.__mareoPayment) return
+    let active = true
+    const timer = setInterval(() => {
+      window.__mareoPayment.order(order.orderId).then((value) => {
+        if (!active || !value) return
+        if (value.status === 'paid') {
+          setOrder(value)
+          setPhase('done')
+          refreshQuotaNow()
+        } else if (value.status === 'cancelled' || value.status === 'failed') {
+          setOrder(value)
+          setPhase('choose')
+          setNotice('二维码已过期，请重新生成')
+        }
+      }).catch(() => {})
+    }, 2000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [open, phase, order?.orderId])
+
+  const start = async () => {
+    if (!window.__mareoPayment || channel === null) return
+    setBusy(true)
+    setNotice('')
+    const result = await window.__mareoPayment.createOrder(tier, channel)
+    setBusy(false)
+    if (!result.ok) {
+      setNotice(result.error)
+      return
+    }
+    setOrder(result.order)
+    setPhase('pay')
+  }
+
+  if (!open) return null
+
+  const close = () => recharge.setOpen(false)
+  const tiers = config?.tiers ?? []
+  const amountOf = (id) => {
+    const entry = tiers.find((item) => item.tier === id)
+    return entry ? yuan(entry.amountMicro) : ''
+  }
+  const remaining = order ? Math.max(0, Math.floor((Date.parse(order.expiresAt) - Date.now()) / 1000)) : 0
+  const clock = `${String(Math.floor(remaining / 3600)).padStart(1, '0')}:${String(Math.floor((remaining % 3600) / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`
+
+  return React.createElement('div', {
+    style: {
+      position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', background: 'rgba(16,24,40,0.45)',
+    },
+    onClick: (event) => { if (event.target === event.currentTarget) close() },
+  },
+  React.createElement('div', { style: panelCardStyle },
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+      React.createElement('strong', { style: { fontSize: 15 } }, '充值 Mareo 余额'),
+      React.createElement('button', {
+        type: 'button',
+        style: { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 15, opacity: 0.6 },
+        onClick: close,
+      }, '\u2715'),
+    ),
+
+    phase === 'choose'
+      ? React.createElement('div', { style: { display: 'grid', gap: 12 } },
+        React.createElement('div', { style: { display: 'flex', gap: 8 } },
+          ...tiers.map((entry) => React.createElement('button', {
+            key: entry.tier,
+            type: 'button',
+            style: entry.tier === tier ? chosenTierStyle : tierButtonStyle,
+            onClick: () => setTier(entry.tier),
+          }, yuan(entry.amountMicro)))),
+        channel === null
+          ? null
+          : React.createElement('div', { style: { display: 'flex', gap: 8 } },
+            ...(config?.channels ?? []).map((id) => React.createElement('button', {
+              key: id,
+              type: 'button',
+              style: id === channel ? chosenTierStyle : tierButtonStyle,
+              onClick: () => setChannel(id),
+            }, id === 'alipay' ? '支付宝' : '微信支付'))),
+        React.createElement('button', {
+          type: 'button', disabled: busy || channel === null || tiers.length === 0, style: primaryButtonStyle, onClick: start,
+        }, busy ? '正在发起…' : '去支付'),
+        notice ? React.createElement('div', { style: { fontSize: 12, opacity: 0.8 } }, notice) : null,
+        React.createElement('div', { style: { fontSize: 12, opacity: 0.6, lineHeight: 1.7 } },
+          '先扣今日免费额度，用完再扣余额；余额长期有效。'),
+      )
+      : null,
+
+    phase === 'pay' && order
+      ? React.createElement('div', { style: { display: 'grid', gap: 10, justifyItems: 'center' } },
+        React.createElement('div', { style: { fontSize: 13, opacity: 0.8 } },
+          '请用' + (order.channel === 'alipay' ? '支付宝' : '微信') + '扫码支付'),
+        // The gateway rendered this QR code; the client never builds one.
+        React.createElement('div', {
+          style: { width: 220, height: 220 },
+          dangerouslySetInnerHTML: { __html: order.qrSvg || '' },
+        }),
+        React.createElement('div', { style: { fontSize: 14, fontWeight: 600 } }, amountOf(order.amountMicro ? tier : tier)),
+        React.createElement('div', { style: { fontSize: 12, opacity: 0.6 } }, '剩余 ' + clock),
+        React.createElement('div', { style: { fontSize: 12, opacity: 0.8 } }, '\u23f3 等待支付…'),
+        React.createElement('button', {
+          type: 'button', style: { ...primaryButtonStyle, background: 'transparent', color: 'var(--dsw-alias-accent, #3d6bfe)', border: '1px solid var(--dsw-alias-border, #d0d5dd)', width: 'auto', padding: '6px 16px' },
+          onClick: start,
+        }, '重新生成'),
+      )
+      : null,
+
+    phase === 'done' && order
+      ? React.createElement('div', { style: { display: 'grid', gap: 8, justifyItems: 'center', padding: '8px 0' } },
+        React.createElement('div', { style: { fontSize: 22 } }, '\u2713'),
+        React.createElement('div', { style: { fontSize: 15, fontWeight: 600 } }, '已到账 ' + yuan(order.amountMicro)),
+        React.createElement('button', { type: 'button', style: { ...primaryButtonStyle, width: 'auto', padding: '6px 20px' }, onClick: close }, '完成'),
+      )
+      : null,
+  ))
+}
+
+function RechargeOverlay() {
+  return React.createElement(RechargePanel)
 }
 
 /**
@@ -335,6 +577,9 @@ exports.apply = (ctx) => {
   ctx.slots.inject('sidebar.brand.name', () => ctx.slots.register({ name: 'sidebar.brand.name' }, BrandName))
   ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, BrandMark))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'mareo-attribution' }, Attribution))
+  if (typeof window !== 'undefined' && window.__mareoPayment) {
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'mareo-recharge' }, RechargeOverlay))
+  }
   if (typeof window !== 'undefined' && (window.__mareoSponsoredAd || window.__mareoQuota)) {
     ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
       name: 'sidebar.footer.action', id: 'mareo-sidebar-footer',

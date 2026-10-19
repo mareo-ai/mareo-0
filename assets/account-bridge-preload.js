@@ -17,6 +17,15 @@ contextBridge.exposeInMainWorld('__mareoQuota', {
   get: () => ipcRenderer.invoke('mareo:quota:get'),
 })
 
+// Recharge. The main process talks to the gateway and to the payment platform;
+// the renderer gets an amount, an order state and a QR code to show.
+contextBridge.exposeInMainWorld('__mareoPayment', {
+  config: () => ipcRenderer.invoke('mareo:payment:config'),
+  createOrder: (tier, channel) => ipcRenderer.invoke('mareo:payment:create', { tier, channel }),
+  order: (orderId) => ipcRenderer.invoke('mareo:payment:order', orderId),
+  orders: (limit) => ipcRenderer.invoke('mareo:payment:orders', limit),
+})
+
 contextBridge.exposeInMainWorld('__mareoAccount', {
   getProfile: () => ipcRenderer.invoke('mareo:account:get'),
   updateName: (displayName) => ipcRenderer.invoke('mareo:account:update-name', displayName),
