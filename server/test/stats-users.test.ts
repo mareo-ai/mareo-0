@@ -123,6 +123,12 @@ test('the page states what it cannot see', () => {
   assert.match(page, /不含任何对话内容/)
   // No external requests, and nothing a client controls is rendered raw.
   assert.equal(/<script|src="http|href="http/.test(page), false)
+  // Tables are reachable by assistive tech: caption plus explicit scopes.
+  assert.match(page, /<caption class="sr-only">/)
+  assert.match(page, /scope="col"/)
+  assert.match(page, /scope="row"/)
+  assert.match(page, /<a class="skip" href="#main">/)
+  assert.match(page, /<main id="main">/)
 })
 
 test('an empty database still renders the page', () => {

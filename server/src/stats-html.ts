@@ -32,6 +32,11 @@ export function stat(label: string, value: string, tone = ''): string {
     `<span class="stat-value">${escapeHtml(value)}</span></div>`
 }
 
+/** A caption that is read by assistive tech but does not repeat the visible heading. */
+export function tableCaption(text: string): string {
+  return `<caption class="sr-only">${escapeHtml(text)}</caption>`
+}
+
 export function table(items: [string, string][]): string {
   return `<table>${items
     .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
@@ -52,12 +57,14 @@ export function page(title: string, nav: NavLink[], subtitle: string, generatedA
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#fcfcfd" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
 <title>${escapeHtml(title)}</title>
 <style>
 :root {
   color-scheme: light dark;
   --bg: #fcfcfd; --panel: #fff; --border: #e6e8ee; --border-soft: #f1f2f6;
-  --text: #16181d; --muted: #6b7280; --faint: #9aa1ac;
+  --text: #16181d; --muted: #5c6472; --faint: #6b7280;
   --accent: #2f5bea; --accent-soft: rgba(47, 91, 234, 0.12);
   --warn: #a86400; --warn-soft: rgba(168, 100, 0, 0.10);
   --good: #157347; --good-soft: rgba(21, 115, 71, 0.10);
@@ -65,7 +72,7 @@ export function page(title: string, nav: NavLink[], subtitle: string, generatedA
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0e1014; --panel: #15181e; --border: #262b34; --border-soft: #1e232b;
-    --text: #edeff3; --muted: #98a0ad; --faint: #6f7885;
+    --text: #edeff3; --muted: #a3abb8; --faint: #8b93a1;
     --accent: #7c96ff; --accent-soft: rgba(124, 150, 255, 0.16);
     --warn: #e0a44a; --warn-soft: rgba(224, 164, 74, 0.12);
     --good: #57c98d; --good-soft: rgba(87, 201, 141, 0.12);
@@ -78,8 +85,11 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .wrap { max-width: 1000px; margin: 0 auto; }
+.skip { position: absolute; left: -9999px; top: 0; padding: 8px 14px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; z-index: 10; }
+.skip:focus { left: 12px; top: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
-h1 { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
 .window { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 10px; }
 .meta { color: var(--faint); font-size: 12px; margin: 6px 0 0; }
 .status { margin: 18px 0 0; padding: 9px 14px; border-radius: 8px; font-size: 13px;
@@ -87,7 +97,7 @@ h1 { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
 .status.ok { border-color: color-mix(in srgb, var(--good) 35%, var(--border)); background: var(--good-soft); color: var(--good); }
 .status.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); background: var(--warn-soft); color: var(--warn); }
 .status a { color: inherit; }
-h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); margin: 38px 0 12px; }
+h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); margin: 38px 0 12px; text-wrap: balance; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 12px; }
 .kpi { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 14px 16px; display: grid; gap: 2px; }
 .kpi-label { font-size: 12px; color: var(--muted); }
@@ -142,12 +152,15 @@ footer a { color: inherit; }
 </head>
 <body>
 <div class="wrap">
+  <a class="skip" href="#main">跳到主要内容</a>
   <header>
     <h1>${escapeHtml(title)}</h1>
     <span class="window">${escapeHtml(subtitle)}</span>
   </header>
   <p class="meta">生成于 ${escapeHtml(generatedAt.toISOString())}（UTC）· 全部为聚合值，不含任何账号信息</p>
+  <main id="main">
 ${body}
+  </main>
   <footer>
     数据来源：Mareo 网关的聚合统计。${links} · <a href="/">返回首页</a> · <a href="/privacy.html">隐私说明</a>
   </footer>

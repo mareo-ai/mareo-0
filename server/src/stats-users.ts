@@ -13,7 +13,7 @@
 import type { GatewayDatabase } from './db.js'
 import { dayStamp, dayStampDaysAgo } from './clock.js'
 import { categorizeTask } from './stats-tasks.js'
-import { escapeHtml, kpi, money, page, percent, stat } from './stats-html.js'
+import { escapeHtml, kpi, money, page, percent, stat, tableCaption } from './stats-html.js'
 import { walletBalanceMicro } from './wallet.js'
 
 /** Requests in the last seven days at or above this mark count as a heavy user. */
@@ -252,6 +252,15 @@ function heavyUser(
   }
 }
 
+/** Last activity as a local date and time, not a slice of an ISO string. */
+const lastActiveFormat = new Intl.DateTimeFormat('zh-CN', {
+  month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai',
+})
+
+function lastActiveLabel(iso: string): string {
+  return iso === '' ? '—' : lastActiveFormat.format(new Date(iso))
+}
+
 function percentile(sorted: number[], fraction: number): number {
   if (sorted.length === 0) return 0
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
@@ -289,12 +298,13 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
 
   <h2>留存（按首次调用成功分 cohort）</h2>
   <table>
-    <tr><th>首次使用</th><th>新增</th><th>D1</th><th>D3</th><th>D7</th></tr>
+    ${tableCaption('按首次调用成功日分组的留存')}
+    <tr><th scope="col">首次使用</th><th scope="col">新增</th><th scope="col">D1</th><th scope="col">D3</th><th scope="col">D7</th></tr>
     ${metrics.cohorts.filter((row) => row.size > 0).length === 0
-      ? '<tr><th>近两周没有新的首次成功调用</th><td>—</td><td>—</td><td>—</td><td>—</td></tr>'
+      ? '<tr><th scope="row">近两周没有新的首次成功调用</th><td>—</td><td>—</td><td>—</td><td>—</td></tr>'
       : metrics.cohorts
           .filter((row) => row.size > 0)
-          .map((row) => `<tr><th>${escapeHtml(row.day)}${row.size < 5 ? ' · 样本小' : ''}</th>` +
+          .map((row) => `<tr><th scope="row">${escapeHtml(row.day)}${row.size < 5 ? ' · 样本小' : ''}</th>` +
             `<td>${row.size}</td><td>${retention(row.d1, row.size)}</td>` +
             `<td>${retention(row.d3, row.size)}</td><td>${retention(row.d7, row.size)}</td></tr>`)
           .join('')}
@@ -316,13 +326,14 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
   ${metrics.heavy.length === 0
     ? '<p class="note">暂无达到阈值的账号。</p>'
     : `<table>
-    <tr><th>用户</th><th>活跃天数</th><th>Session</th><th>请求</th><th>真实成本</th><th>主线任务</th><th>Wallet</th><th>付费</th><th>最近活跃</th></tr>
+    ${tableCaption('按真实成本排序的重度账号')}
+    <tr><th scope="col">用户</th><th scope="col">活跃天数</th><th scope="col">Session</th><th scope="col">请求</th><th scope="col">真实成本</th><th scope="col">主线任务</th><th scope="col">Wallet</th><th scope="col">付费</th><th scope="col">最近活跃</th></tr>
     ${metrics.heavy
-      .map((user) => `<tr><th>${escapeHtml(user.displayName)}</th>` +
+      .map((user) => `<tr><th scope="row">${escapeHtml(user.displayName)}</th>` +
         `<td>${user.activeDays}</td><td>${user.sessions}</td><td>${user.requests}</td>` +
         `<td>${money(user.actualMicro)}</td><td>${escapeHtml(categoryLabel(user.category))}</td>` +
         `<td>${money(user.walletMicro)}</td><td>${user.paid ? '是' : '否'}</td>` +
-        `<td>${escapeHtml(user.lastActive.slice(5, 16).replace('T', ' '))}</td></tr>`)
+        `<td>${escapeHtml(lastActiveLabel(user.lastActive))}</td></tr>`)
       .join('')}
   </table>`}
   <p class="note">不含任何对话内容：主线任务来自会话标题的关键词分类，钱包余额与是否付费来自账本。</p>

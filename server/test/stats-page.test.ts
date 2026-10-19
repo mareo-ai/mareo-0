@@ -161,6 +161,31 @@ test('the health line on the business page names what is off and links to the de
   assert.match(broken, /href="\/stats\/health\/"/)
 })
 
+test('the pages meet the accessibility floor the guidelines set', () => {
+  const ceo = renderCeoPage(withMetrics({}), { generatedAt: GENERATED })
+  const health = renderHealthPage(withMetrics({}), { generatedAt: GENERATED })
+  for (const page of [ceo, health]) {
+    assert.match(page, /<html lang="zh-CN">/)
+    assert.match(page, /<a class="skip" href="#main">跳到主要内容<\/a>/, '键盘用户要能跳过页头')
+    assert.match(page, /<main id="main">/)
+    assert.match(page, /<meta name="theme-color"/)
+    assert.equal((page.match(/<h1[ >]/g) ?? []).length, 1, '一页只有一个 h1')
+  }
+  // Tables carry a caption and explicit header scopes.
+  assert.match(health, /<caption class="sr-only">/)
+  assert.match(health, /scope="col"/)
+  assert.match(health, /scope="row"/)
+  // Decorative bars are hidden from assistive tech; the number beside them is not.
+  const withBars = renderCeoPage(
+    withMetrics({
+      platforms: [{ platform: 'darwin', n: 1 }],
+      taskMix: [{ category: 'coding', sessions: 1, share: 1 }],
+    }),
+    { generatedAt: GENERATED },
+  )
+  assert.match(withBars, /class="bar" aria-hidden="true"/)
+})
+
 test('neither page loads anything from outside', () => {
   const ceo = renderCeoPage(withMetrics({}), { generatedAt: GENERATED })
   const health = renderHealthPage(withMetrics({}), { generatedAt: GENERATED })

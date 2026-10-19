@@ -400,18 +400,26 @@ function spark(series: { day: string; value: number }[]): string {
     `<circle cx="${last[0]}" cy="${last[1]}" r="2.2" fill="var(--accent)"></circle></svg>`
 }
 
+/** A short, locale-formatted day label for the sparkline ends. */
+const shortDay = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', timeZone: 'Asia/Shanghai' })
+
+function labelOfDay(day: string | undefined): string {
+  return day === undefined ? '' : shortDay.format(new Date(`${day}T12:00:00+08:00`))
+}
+
 function trend(label: string, series: { day: string; value: number }[], total: string): string {
   return `<div class="trend"><div class="trend-head"><span class="kpi-label">${escapeHtml(label)}</span>` +
     `<span class="trend-total">${escapeHtml(total)}</span></div>${spark(series)}` +
-    `<div class="trend-days"><span>${escapeHtml(series[0]?.day.slice(5) ?? '')}</span>` +
-    `<span>${escapeHtml(series.at(-1)?.day.slice(5) ?? '')}</span></div></div>`
+    `<div class="trend-days"><span>${escapeHtml(labelOfDay(series[0]?.day))}</span>` +
+    `<span>${escapeHtml(labelOfDay(series.at(-1)?.day))}</span></div></div>`
 }
 
 /** One row of the growth funnel: the count, and how much survived from the step above. */
-function funnelStep(label: string, value: number, previous: number | undefined, note: string): string {
-  const conversion = previous === undefined ? '' : `上一环节 ${percent(value, previous)}`
+function funnelStep(label: string, value: number | string, previous: number | undefined, note: string): string {
+  const shown = typeof value === 'number' ? value.toLocaleString('en-US') : value
+  const conversion = previous === undefined || typeof value !== 'number' ? '' : `上一环节 ${percent(value, previous)}`
   return `<div class="step"><div class="step-head"><span class="step-label">${escapeHtml(label)}</span>` +
-    `<span class="step-value">${value.toLocaleString('en-US')}</span></div>` +
+    `<span class="step-value">${escapeHtml(shown)}</span></div>` +
     `<div class="step-note">${escapeHtml(note)}${conversion === '' ? '' : ' · ' + escapeHtml(conversion)}</div></div>`
 }
 
@@ -427,7 +435,8 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
   const d7 = today.d7Cohort === 0 ? '—' : percent(today.d7Retained, today.d7Cohort)
   const coverage = today.sessionCoverage === 0 ? '—' : percent(today.sessionCoverage * 100, 100)
   const recovery = finance.costRecovery === undefined ? '—' : percent(finance.costRecovery * 100, 100)
-  const downloads = options.downloads === undefined ? 0 : options.downloads
+  // Unknown is not zero: the shell script passes the count, a preview does not.
+  const downloads = options.downloads
   const status = metrics.health.ok
     ? `<p class="status ok">系统正常<span class="note" style="margin:0">模型成功率 ${percent(metrics.okWeek, metrics.requestsWeek)} · 启动成功率 ${percent(metrics.launchesWeek.ok, metrics.launchesWeek.total)}</span></p>`
     : `<p class="status warn">⚠ ${escapeHtml(metrics.health.issues.join(' · '))} <a href="/stats/health/">查看工程健康 →</a></p>`
@@ -451,7 +460,7 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
   <h2>增长</h2>
   <div class="steps">
     ${funnelStep('官网访问', funnel.views, undefined, '近 7 天 · 执行了 JavaScript 的真实浏览器')}
-    ${funnelStep('安装包下载', downloads, funnel.views, '近 7 天 · 访问日志计数')}
+    ${funnelStep('安装包下载', downloads ?? '—', downloads === undefined ? undefined : funnel.views, downloads === undefined ? '近 7 天 · 本次生成未统计下载数' : '近 7 天 · 访问日志计数')}
   </div>
   <p class="note">以上两步是<b>次数</b>，不是去重人数，所以只给占比、不参与下面的账号转化。</p>
   <div class="steps" style="margin-top:12px">
@@ -486,7 +495,7 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
       : metrics.taskMix
           .map((row) => `<div class="mix-row"><span class="mix-label">${escapeHtml(taskLabel(row.category))}</span>` +
             `<span class="mix-value">${row.sessions} 个会话 · ${percent(row.sessions, metrics.taskMix.reduce((sum, item) => sum + item.sessions, 0))}</span>` +
-            `<div class="bar"><span style="width:${Math.max(2, Math.round(row.share * 100))}%"></span></div></div>`)
+            `<div class="bar" aria-hidden="true"><span style="width:${Math.max(2, Math.round(row.share * 100))}%"></span></div></div>`)
           .join('')}
   </div>
   <p class="note">
@@ -532,9 +541,12 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
   </div>
 
   <h2>请求结果（近 7 天）</h2>
-  <table>${metrics.statusWeek.length === 0
-    ? '<tr><th>暂无数据</th><td>—</td></tr>'
-    : metrics.statusWeek.map((row) => `<tr><th>HTTP ${row.status}</th><td>${row.n.toLocaleString('en-US')}</td></tr>`).join('')}</table>
+  <table>
+    <caption class="sr-only">近 7 天的请求结果分布</caption>
+    <tr><th scope="col">状态</th><th scope="col">请求数</th></tr>
+    ${metrics.statusWeek.length === 0
+    ? '<tr><th scope="row">暂无数据</th><td>—</td></tr>'
+    : metrics.statusWeek.map((row) => `<tr><th scope="row">HTTP ${row.status}</th><td>${row.n.toLocaleString('en-US')}</td></tr>`).join('')}</table>
 
   <h2>每日请求（近 7 天）</h2>
   <div class="trends">
@@ -544,9 +556,12 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
   </div>
 
   <h2>版本与平台（近 7 天启动）</h2>
-  <table>${metrics.versions.length === 0
-    ? '<tr><th>版本分布</th><td>暂无数据</td></tr>'
-    : metrics.versions.map((row) => `<tr><th>${escapeHtml(row.version)} · ${escapeHtml(row.platform)}</th><td>${row.n}</td></tr>`).join('')}</table>
+  <table>
+    <caption class="sr-only">近 7 天启动的版本与平台分布</caption>
+    <tr><th scope="col">版本 · 平台</th><th scope="col">启动次数</th></tr>
+    ${metrics.versions.length === 0
+      ? '<tr><th scope="row">版本分布</th><td>暂无数据</td></tr>'
+      : metrics.versions.map((row) => `<tr><th scope="row">${escapeHtml(row.version)} · ${escapeHtml(row.platform)}</th><td>${row.n}</td></tr>`).join('')}</table>
   <div class="stats">
     ${metrics.platforms.map((row) => stat(row.platform, `${row.n} · ${percent(row.n, platformTotal)}`)).join('')}
   </div>
