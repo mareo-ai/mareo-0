@@ -282,6 +282,13 @@ export async function proxyRequest(
   if (contentType !== undefined) forwardedHeaders['content-type'] = String(contentType)
   const accept = request.headers['accept']
   if (accept !== undefined) forwardedHeaders.accept = String(accept)
+  // Feature headers are part of the protocol, not decoration. The file API is
+  // only reachable when `anthropic-beta` says so; dropping it upstream turned
+  // every attachment upload into a 400 the client retried in a loop.
+  for (const header of ['anthropic-beta', 'anthropic-version'] as const) {
+    const value = request.headers[header]
+    if (value !== undefined) forwardedHeaders[header] = String(value)
+  }
 
   let upstream: Response
   try {
