@@ -26,7 +26,7 @@
 和 [`design/themes/dashboard.md`](design/themes/dashboard.md)；工程规则见
 [`design/web-interface-guidelines.md`](design/web-interface-guidelines.md)。
 
-四个页面都由 `server/deploy/stats-page.sh` 从数据库生成**静态 HTML**（每 15 分钟一次；`--page ceo|health` 分开生成）：
+三个页面都由 `server/deploy/stats-page.sh` 从数据库生成**静态 HTML**（每 15 分钟一次；`--page ceo|users|health` 分开生成）：
 
 ```sh
 # ECS 上安装一次
