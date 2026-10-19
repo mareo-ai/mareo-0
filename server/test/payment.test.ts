@@ -2,7 +2,7 @@
 // things that decide whether it is credited: that a callback really came from
 // the platform, and that the same payment can never be credited twice.
 import assert from 'node:assert/strict'
-import { generateKeyPairSync, createSign } from 'node:crypto'
+import { generateKeyPairSync, createSign, createVerify } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -352,6 +352,40 @@ test('an Alipay notification is only believed when its signature checks out', as
   assert.equal(waiting?.succeeded, false)
   const closed = await provider.verifyCallback({}, signedCallback(callbackFields({ trade_status: 'TRADE_CLOSED' })))
   assert.equal(closed?.succeeded, false)
+})
+
+test('a request is signed over every parameter except sign, sign_type included', async () => {
+  // The gateway rejects the other convention with `isv.invalid-signature`, which
+  // reads like a key problem. This pins the convention that actually works.
+  const originalFetch = globalThis.fetch
+  let sent = ''
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    sent = String(init?.body ?? '')
+    return new Response(
+      JSON.stringify({ alipay_trade_query_response: { code: '40004', sub_code: 'ACQ.TRADE_NOT_EXIST', sub_msg: '交易不存在' } }),
+      {
+      status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    )
+  }) as typeof fetch
+  try {
+    await alipayProvider(alipayConfig()).queryOrder({ orderId: 'MR20260101000000ABCDEF' } as never)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  const params = Object.fromEntries(new URLSearchParams(sent)) as Record<string, string>
+  const content = Object.keys(params)
+    .filter((key) => key !== 'sign')
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join('&')
+  assert.ok(content.includes('sign_type=RSA2'), 'sign_type 必须被签名覆盖')
+  assert.equal(
+    createVerify('RSA-SHA256').update(content, 'utf8').verify(PUBLIC_PEM, params.sign, 'base64'),
+    true,
+  )
 })
 
 test('Alipay keys are accepted as PEM or as the bare base64 the platform shows', () => {

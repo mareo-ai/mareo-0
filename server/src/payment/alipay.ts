@@ -36,10 +36,18 @@ export function alipayProvider(config: AlipayConfig): PaymentProvider {
   const privateKey = normalizeKey(config.privateKey, 'RSA PRIVATE KEY')
   const publicKey = normalizeKey(config.publicKey, 'PUBLIC KEY')
 
-  /** `k=v&…` over the non-empty parameters, sorted, `sign`/`sign_type` left out. */
-  function signingContent(params: Record<string, string>): string {
+  /**
+   * Alipay's two canonical forms are not the same, and the platform's own SDKs
+   * implement them as two separate functions: a *request* is signed over every
+   * parameter except `sign` — so `sign_type` is part of what it covers — while a
+   * *notification* is checked with `sign` and `sign_type` both dropped. Getting
+   * this backwards fails every call with `isv.invalid-signature`, which says
+   * nothing useful about which side is wrong.
+   */
+  function signingContent(params: Record<string, string>, dropSignType: boolean): string {
     return Object.keys(params)
-      .filter((key) => key !== 'sign' && key !== 'sign_type' && params[key] !== '' && params[key] !== undefined)
+      .filter((key) => key !== 'sign' && (!dropSignType || key !== 'sign_type'))
+      .filter((key) => params[key] !== '' && params[key] !== undefined)
       .sort()
       .map((key) => `${key}=${params[key]}`)
       .join('&')
@@ -56,7 +64,7 @@ export function alipayProvider(config: AlipayConfig): PaymentProvider {
       biz_content: JSON.stringify(bizContent),
     }
     if (notifyUrl !== undefined) params.notify_url = notifyUrl
-    params.sign = createSign('RSA-SHA256').update(signingContent(params), 'utf8').sign(privateKey, 'base64')
+    params.sign = createSign('RSA-SHA256').update(signingContent(params, false), 'utf8').sign(privateKey, 'base64')
 
     const response = await fetch(gateway, {
       method: 'POST',
@@ -96,7 +104,7 @@ export function alipayProvider(config: AlipayConfig): PaymentProvider {
       const params = Object.fromEntries(new URLSearchParams(rawBody.toString('utf8')))
       const sign = params.sign
       if (typeof sign !== 'string' || sign === '') return undefined
-      const verified = createVerify('RSA-SHA256').update(signingContent(params), 'utf8').verify(publicKey, sign, 'base64')
+      const verified = createVerify('RSA-SHA256').update(signingContent(params, true), 'utf8').verify(publicKey, sign, 'base64')
       if (!verified) return undefined
 
       const orderId = params.out_trade_no
