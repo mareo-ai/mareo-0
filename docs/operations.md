@@ -23,7 +23,7 @@
 访问需要 Basic Auth（`auth_basic` + `/etc/nginx/.htpasswd-stats`，见 `server/deploy/mareo-site.conf` 的 `location ^~ /stats/`）。
 
 页面的取向、配色与版式规范见 [`design/product-design-principles.md`](design/product-design-principles.md)
-和 [`design/themes/ink-and-paper.md`](design/themes/ink-and-paper.md)；工程规则见
+和 [`design/themes/dashboard.md`](design/themes/dashboard.md)；工程规则见
 [`design/web-interface-guidelines.md`](design/web-interface-guidelines.md)。
 
 四个页面都由 `server/deploy/stats-page.sh` 从数据库生成**静态 HTML**（每 15 分钟一次；`--page ceo|health` 分开生成）：
