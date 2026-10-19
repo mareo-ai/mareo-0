@@ -2,7 +2,7 @@
 
 - 日期：2026-10-19
 - 状态：confirmed, to implement
-- 依赖：[`../standard.md`](../standard.md)、`docs/design/product-design-principles.md`、`docs/design/themes/dashboard.md`、`docs/design/web-interface-guidelines.md`
+- 依赖：[`../money/standard.md`](../money/standard.md)、[`product-design-principles.md`](./product-design-principles.md)、[`themes/dashboard.md`](./themes/dashboard.md)、[`web-interface-guidelines.md`](./web-interface-guidelines.md)
 - 影响：`/stats/`、`/stats/users/`、`/stats/health/` 的 HTML 展示；不改变数据采集、查询或资金行为。
 - 审阅状态：文档已于 2026-10-19 提交（87e079f），用户确认「没问题，继续吧」，开始实现。
 - 实施状态：代码已完成并验证，待代码审阅、合并与单独批准部署；生产尚未变更。
