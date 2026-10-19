@@ -6,6 +6,18 @@ import type { RequestKind } from './usage.js'
 export interface ProxyConfig {
   upstreamBaseUrl: string
   apiKey: string
+  /**
+   * How the upstream expects the key. DeepSeek's Messages endpoint takes the
+   * Anthropic `x-api-key` shape as a bearer token; OpenAI takes `Bearer`.
+   */
+  auth?: 'bearer'
+  /** Strips this path prefix before appending to the upstream base. */
+  stripPrefix?: string
+  /**
+   * Rejects a request before it is forwarded when the model cannot be priced.
+   * Absent on the default upstream, where every model is priced by one table.
+   */
+  allowedModel?: (model: string | null) => boolean
 }
 
 /**
@@ -190,6 +202,33 @@ export function usageFromResponseText(text: string): TokenUsage | undefined {
     return undefined
   }
 
+  // Responses API reports `input_tokens` / `output_tokens` like Anthropic does,
+  // but puts cached tokens in `input_tokens_details` and reasoning in
+  // `output_tokens_details`. Reading it as Anthropic would bill every cached
+  // input token at the miss price — roughly ten times too much.
+  const responsesInput = numberFrom(raw, 'input_tokens')
+  const inputDetails = raw.input_tokens_details
+  if (inputDetails !== undefined || raw.output_tokens_details !== undefined) {
+    const cached =
+      typeof inputDetails === 'object' && inputDetails !== null
+        ? numberFrom(inputDetails as Record<string, unknown>, 'cached_tokens')
+        : 0
+    const outputDetails = raw.output_tokens_details
+    const reasoning =
+      typeof outputDetails === 'object' && outputDetails !== null
+        ? numberFrom(outputDetails as Record<string, unknown>, 'reasoning_tokens')
+        : 0
+    const responsesOutput = numberFrom(raw, 'output_tokens')
+    if (responsesInput === 0 && responsesOutput === 0) return undefined
+    return {
+      inputTokens: responsesInput,
+      cacheHitTokens: cached,
+      cacheMissTokens: Math.max(0, responsesInput - cached),
+      outputTokens: responsesOutput,
+      reasoningTokens: reasoning,
+    }
+  }
+
   // Anthropic-compatible responses — the shape the bundled web search uses —
   // report the cache counts *outside* `input_tokens`, so the total prompt is
   // the sum of the parts. Reading them as OpenAI fields would treat every
@@ -276,7 +315,29 @@ export async function proxyRequest(
   // in `chat` — and the request body, not the path, is what says which it is.
   const requestKind: RequestKind = isSearchRequest(body) ? 'search' : isTitleRequest(body) ? 'title' : 'chat'
 
-  const upstreamUrl = new URL(request.url ?? '/', withTrailingSlash(config.upstreamBaseUrl)).toString()
+  const requestPath = request.url ?? '/'
+  const forwardedPath =
+    config.stripPrefix !== undefined && requestPath.startsWith(config.stripPrefix)
+      ? requestPath.slice(config.stripPrefix.length)
+      : requestPath
+  if (config.allowedModel !== undefined && !config.allowedModel(model)) {
+    const message = `模型 ${model ?? '(未指定)'} 不在可售列表里。`
+    if (!response.headersSent) {
+      response.statusCode = 400
+      response.setHeader('content-type', 'application/json; charset=utf-8')
+      response.end(JSON.stringify({ error: 'unpriced-model', message }))
+    }
+    return {
+      status: 400,
+      model,
+      promptChars: 0,
+      completionChars: 0,
+      latencyMs: Date.now() - started,
+      requestKind,
+      sessionId,
+    }
+  }
+  const upstreamUrl = new URL(forwardedPath.startsWith('/') ? forwardedPath : `/${forwardedPath}`, withTrailingSlash(config.upstreamBaseUrl)).toString()
   const forwardedHeaders: Record<string, string> = { authorization: `Bearer ${config.apiKey}` }
   const contentType = request.headers['content-type']
   if (contentType !== undefined) forwardedHeaders['content-type'] = String(contentType)

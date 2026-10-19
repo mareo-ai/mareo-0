@@ -8,7 +8,7 @@ import { proxyRequest, type ProxyConfig, type ProxyOutcome } from './proxy.js'
 import { parseSessionTitleDetail, recordSessionTitle } from './session-titles.js'
 import { parseSiteView, recordSiteView } from './site-views.js'
 import { startOfDay } from './clock.js'
-import { costOf, settleMicro } from './pricing.js'
+import { costOf, fxRate, providerForModel, settleMicro } from './pricing.js'
 import { recordUsage, countRequestsSince, type UsageBilling } from './usage.js'
 import { readSponsoredAd, recordAdEvent } from './sponsored-ad.js'
 import { readSettings, settlementRateFor, type Settings } from './settings.js'
@@ -31,6 +31,12 @@ import { completeRewardTask, rewardOfferFor, startRewardTask } from './rewards.j
 
 export interface GatewayOptions extends ProxyConfig {
   db: GatewayDatabase
+  /**
+   * The OpenAI-shaped upstream, when it is configured. Requests under `/openai/`
+   * go here instead of to the DeepSeek base; without it those paths answer 503
+   * rather than silently falling through to the wrong vendor.
+   */
+  openaiUpstream?: ProxyConfig
   /** Per-user daily request cap; 0 disables the check. */
   dailyLimit: number
   sponsoredAdFile?: string
@@ -234,6 +240,18 @@ async function handleRequest(
     return
   }
 
+  // Everything under /openai/ belongs to the OpenAI upstream; the rest is the
+  // DeepSeek proxy that was here first.
+  const openaiPath = pathname.startsWith('/openai/')
+  const upstreamConfig: ProxyConfig | undefined = openaiPath ? options.openaiUpstream : options
+  if (upstreamConfig === undefined) {
+    sendJson(response, 503, {
+      error: 'openai-unavailable',
+      message: 'OpenAI 模型暂不可用。',
+    })
+    return
+  }
+
   // Every other path (the model API and anything else DeepSeek serves) is proxied.
   const owner = authenticate(request, options.db)
   if (!owner) {
@@ -301,7 +319,12 @@ async function handleRequest(
     return
   }
 
-  const outcome = await proxyRequest(request, response, options)
+  const outcome = await proxyRequest(request, response, {
+    ...upstreamConfig,
+    // A model with no price would be served on our money and billed at zero, so
+    // the OpenAI path refuses it before forwarding.
+    ...(openaiPath ? { allowedModel: (model: string | null) => providerForModel(model) === 'openai' } : {}),
+  })
   try {
     // The row and the wallet debit it may cause are one movement of money, so
     // they land together or not at all.
@@ -321,6 +344,8 @@ async function handleRequest(
         // zero: an unaccounted request must not look free.
         usageSource: outcome.status === 200 ? (outcome.tokens === undefined ? 'missing' : 'provider') : undefined,
         requestKind: outcome.requestKind,
+        provider: billing?.provider,
+        fxRate: billing?.fxRate,
         billing,
       })
       const walletPart = (billing?.billableMicro ?? 0) - (billing?.paidFromFreeMicro ?? 0)
@@ -350,12 +375,20 @@ async function handleRequest(
  * usage or the model has no price: an unpriced request is recorded as such and
  * never billed at zero.
  */
-function billingFor(outcome: ProxyOutcome, credit: CreditState, settings: Settings): UsageBilling | undefined {
+function billingFor(
+  outcome: ProxyOutcome,
+  credit: CreditState,
+  settings: Settings,
+): (UsageBilling & { provider: string; fxRate?: number }) | undefined {
   if (outcome.status !== 200 || outcome.tokens === undefined) return undefined
   const cost = costOf(outcome.tokens, outcome.model, new Date())
   if (cost === undefined) return undefined
+  const provider = providerForModel(outcome.model)
+  if (provider === undefined) return undefined
   const { actualMicro, billableMicro, marginMicro } = settleMicro(cost, settlementRateFor(settings, outcome.model))
   return {
+    provider,
+    ...(provider === 'openai' ? { fxRate: fxRate() } : {}),
     actualMicro,
     billableMicro,
     marginMicro,

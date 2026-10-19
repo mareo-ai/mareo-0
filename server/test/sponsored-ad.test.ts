@@ -114,7 +114,7 @@ test('schema v6 upgrade adds ad table without changing users or existing events'
   try {
     assert.equal(db.prepare('SELECT id FROM users').get()?.id, userId)
     assert.equal(db.prepare('SELECT name FROM events').get()?.name, 'launch')
-    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 10)
+    assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 11)
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ad_events').get()?.n, 0)
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }) }
 })

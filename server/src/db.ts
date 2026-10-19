@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS usage (
   cacheMissTokens INTEGER,
   outputTokens INTEGER,
   reasoningTokens INTEGER,
+  provider TEXT,
+  fxRate REAL,
   sessionId TEXT,
   usageSource TEXT,
   actualMicro INTEGER,
@@ -201,7 +203,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_txn
   ON payment_orders(provider, transactionId) WHERE transactionId IS NOT NULL;
 `
 
-const SCHEMA_VERSION = 10
+const SCHEMA_VERSION = 11
 
 export function openDatabase(dbPath: string): GatewayDatabase {
   mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true })
@@ -236,6 +238,11 @@ function addUsageColumns(db: GatewayDatabase): void {
     // v9: what the request really cost and what the user was charged for it.
     // Rows written before this arrived keep NULL, which is how the reports tell
     // "recorded before billing existed" apart from "recorded and free".
+    // v11: which upstream served the request, and the USD→CNY rate used to price
+    // it. Historical rows keep NULL, which the reports read as DeepSeek — the
+    // only upstream that existed when they were written.
+    ['provider', 'TEXT'],
+    ['fxRate', 'REAL'],
     ['actualMicro', 'INTEGER'],
     ['billableMicro', 'INTEGER'],
     ['marginMicro', 'INTEGER'],

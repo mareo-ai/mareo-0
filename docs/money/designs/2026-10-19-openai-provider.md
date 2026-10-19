@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | 日期 | 2026-10-19 |
-| 状态 | **draft，待评审**（价格表、汇率、首批模型待确认） |
+| 状态 | **confirmed, to implement** —— 服务端已实现（PR 见仓库），客户端路由待办 |
 | 依赖 | [`../standard.md`](../standard.md)（单位、入账来源、账本语义、报表定义） |
 | 影响 | 网关新增一个上游与一张价目表、`usage` 增列、报表按 provider 分账、客户端模型目录 |
 | 是否用户可见 | 是（模型选择器里出现 `gpt-5`，需要一次客户端发版） |
@@ -28,9 +28,9 @@
 **新增两件事**：
 
 1. **美元 → 人民币**：OpenAI 官方价是 USD/1M tokens。表里存 USD，运行时乘**汇率**：
-   - 汇率**可配置**（`PRICING_FX_RATE` 环境变量，默认 **7.0**），改汇率不需要发版
+   - 汇率**可配置**（`PRICING_FX_RATE` 环境变量，默认 **7**），改汇率不需要发版
    - **只影响之后的请求**：`usage.actualMicro` 在请求结束时算好并落库，换汇率**不回算历史**
-   - 每行 `usage` 记录 `priceVersion`（如 `2026-10-19#fx7.0`），任何一笔都能追溯到用了哪张价目表、哪个汇率
+   - 每行 `usage` 记录 `fxRate`，任何一笔美元请求都能复算
    - 以后改成每日自动更新（取中间价）时，只需替换这个值的来源，计价逻辑不变
 2. **缓存计价三档不同**（与 DeepSeek 对齐但数值不同）：
    - OpenAI：`cached input` 约为 `input` 的 **10%**（具体以官方价目为准）
@@ -54,16 +54,16 @@
 
 ## 3. 数据模型（schema v10 → v11）
 
-`usage` 增两列（不动其他表）：
+`usage` 增两列（不动其他表，不加索引——分账查询暂时用不上）：
 
 ```sql
-ALTER TABLE usage ADD COLUMN provider TEXT;            -- deepseek | openai（未来 azure、anthropic）
-ALTER TABLE usage ADD COLUMN cacheWriteTokens INTEGER; -- Anthropic 用；OpenAI 恒为 0
+ALTER TABLE usage ADD COLUMN provider TEXT;  -- deepseek | openai
+ALTER TABLE usage ADD COLUMN fxRate REAL;    -- 该笔使用的 USD→CNY 汇率（DeepSeek 行为 NULL）
 ```
 
-- 历史行 `provider = NULL`，报表把 NULL 视为 `deepseek`（当时只有这一个上游）
-- 新写入必须带 `provider`；读侧兼容 NULL（避免历史报表崩）
-- 索引：`idx_usage_provider_ts ON usage(provider, ts)`，供按 provider 分账查询
+- 历史行两列均为 `NULL`，报表把 `provider` 的 NULL 视为 `deepseek`（当时只有这一个上游）
+- `fxRate` 让每一笔美元计价的请求都能自己复算：`tokens × 单价 × fxRate = actualMicro`
+- **不记录 `cacheWriteTokens`**：只有 Anthropic 需要，等它接入时再加列，现在加就是为想象中的需求付利息
 
 ## 4. 流程
 
@@ -185,9 +185,8 @@ OPENAI_BASE_URL=              # 可选；留空用 https://api.openai.com/v1
 
 ## 7. 报表
 
-- `cost-report` 增加**按 provider 分账**：请求数、真实成本、结算成本、毛利、免费额度成本
-- 「钱包与毛利」分节按 provider 拆一行；口径不变（充值≠收入等）
-- 汇率与价目表的版本写进报表页脚（"价目表 2026-10-19 · 汇率 7.3"），便于回溯
+- **本阶段不做按 provider 分账**：两个上游的成本都已折算成人民币，汇总口径不变；等 Claude 接入、provider 数量上去以后再拆，现在拆只是多一个维度没有决策价值
+- 汇率写进报表页脚（"汇率 7.0 · 2026-10-19"），便于回溯
 
 ## 8. 上线顺序
 
@@ -220,3 +219,6 @@ OPENAI_BASE_URL=              # 可选；留空用 https://api.openai.com/v1
 | 日期 | 改动 | 原因 |
 |---|---|---|
 | 2026-10-19 | 初版：OpenAI 作为第二上游，Mareo 转售计价；上游参数化以便切 Azure | 负责人决定只做 B（转售），不做 BYOK |
+| 2026-10-19 | 模型改为 GPT-6 三档（Max/Prime/Lite），Luna 不上架；汇率改可配置默认 7；数据模型只加 `provider` + `fxRate` | 调研到真实型号与价格；实测 Luna 在我们 96.5% 缓存命中的负载下更贵 74% |
+| 2026-10-19 | 取消输出上限；实现长上下文整单重定价 | 负责人不接受限制输出；长上下文是真实成本规则 |
+| 2026-10-19 | 服务端实现完成（价目表、schema v11、`/openai/v1/responses` 分流、Responses usage 归一化、未定价模型 fail-closed、142 条测试） | 按本文实现 |

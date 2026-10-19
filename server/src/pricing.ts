@@ -14,6 +14,13 @@
  * retired, requests are served by DeepSeek-V4.1-Flash and billed at Flash
  * prices, so both names map to the same row.
  *
+ * OpenAI is priced in USD per 1M tokens and converted with a configurable rate
+ * (`PRICING_FX_RATE`, default 7.0). It has no peak/off-peak tiers, but prompts
+ * over 272K input tokens bill the whole request at 2x input and 1.5x output:
+ *
+ *   gpt-6-sol     cached $0.2 | input $2  | output $10
+ *   gpt-6-astra   cached $1   | input $10 | output $50
+ *
  * Byte counts must never be used to price anything — a streaming response is one
  * JSON frame per token, so response bytes overstate tokens by roughly 300x.
  */
@@ -25,6 +32,40 @@ export interface ModelPrice {
   cacheMiss: number
   /** CNY per 1M output tokens (reasoning tokens are billed here). */
   output: number
+}
+
+export type Provider = 'deepseek' | 'openai'
+
+/** USD per 1M tokens, as the vendor lists them. */
+const OPENAI_USD_PRICES: Record<string, ModelPrice> = {
+  'gpt-6-sol': { cacheHit: 0.2, cacheMiss: 2, output: 10 },
+  'gpt-6-astra': { cacheHit: 1, cacheMiss: 10, output: 50 },
+}
+
+/** Above this many input tokens the vendor bills the whole request at a higher tier. */
+export const LONG_CONTEXT_TOKENS = 272_000
+const LONG_CONTEXT_INPUT_FACTOR = 2
+const LONG_CONTEXT_OUTPUT_FACTOR = 1.5
+
+/** Default rate used when the operator has not set one. */
+const DEFAULT_FX_RATE = 7
+
+/**
+ * CNY per dollar. Configurable so the rate can move without a release; it only
+ * ever affects requests priced after the change, because a request's cost is
+ * computed and stored when the request finishes.
+ */
+export function fxRate(): number {
+  const configured = Number(process.env.PRICING_FX_RATE)
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_FX_RATE
+}
+
+/** Which upstream serves a model, or undefined for a model we do not sell. */
+export function providerForModel(model: string | null | undefined): Provider | undefined {
+  if (model === null || model === undefined) return undefined
+  if (model in OPENAI_USD_PRICES) return 'openai'
+  if (model in OFF_PEAK_PRICES) return 'deepseek'
+  return undefined
 }
 
 const OFF_PEAK_PRICES: Record<string, ModelPrice> = {
@@ -42,9 +83,14 @@ export function isPeakHour(at: Date): boolean {
   return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10)
 }
 
-/** Price for a model at a moment, or undefined for a model we have no price for. */
+/** Price for a model at a moment in CNY, or undefined for a model we have no price for. */
 export function priceFor(model: string | null | undefined, at: Date): ModelPrice | undefined {
   if (model === null || model === undefined) return undefined
+  const usd = OPENAI_USD_PRICES[model]
+  if (usd !== undefined) {
+    const rate = fxRate()
+    return { cacheHit: usd.cacheHit * rate, cacheMiss: usd.cacheMiss * rate, output: usd.output * rate }
+  }
   const base = OFF_PEAK_PRICES[model]
   if (base === undefined) return undefined
   if (!isPeakHour(at)) return base
@@ -64,10 +110,15 @@ export interface TokenUsage {
 export function costOf(usage: TokenUsage, model: string | null | undefined, at: Date): number | undefined {
   const price = priceFor(model, at)
   if (price === undefined) return undefined
+  // A prompt above the long-context threshold reprices the whole request, not
+  // just the excess: that is how the vendor bills it, so it is how we bill it.
+  const longContext = providerForModel(model) === 'openai' && usage.inputTokens > LONG_CONTEXT_TOKENS
+  const inputFactor = longContext ? LONG_CONTEXT_INPUT_FACTOR : 1
+  const outputFactor = longContext ? LONG_CONTEXT_OUTPUT_FACTOR : 1
   return (
-    (usage.cacheHitTokens / 1e6) * price.cacheHit +
-    (usage.cacheMissTokens / 1e6) * price.cacheMiss +
-    (usage.outputTokens / 1e6) * price.output
+    (usage.cacheHitTokens / 1e6) * price.cacheHit * inputFactor +
+    (usage.cacheMissTokens / 1e6) * price.cacheMiss * inputFactor +
+    (usage.outputTokens / 1e6) * price.output * outputFactor
   )
 }
 
@@ -93,5 +144,5 @@ export function settleMicro(
 }
 
 export function knownModels(): string[] {
-  return Object.keys(OFF_PEAK_PRICES)
+  return [...Object.keys(OFF_PEAK_PRICES), ...Object.keys(OPENAI_USD_PRICES)]
 }

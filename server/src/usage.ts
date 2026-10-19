@@ -31,6 +31,10 @@ export interface UsageRecord {
   usageSource?: 'provider' | 'missing'
   /** 'title' for the session-title call, 'search' for web search, 'chat' otherwise. */
   requestKind?: RequestKind
+  /** Which upstream served the request; absent for rows written before it was recorded. */
+  provider?: string
+  /** The USD→CNY rate used to price this request, for rows billed in dollars. */
+  fxRate?: number
   /** Absent when the model has no known price: an unpriced request is not billed. */
   billing?: UsageBilling
 }
@@ -43,9 +47,9 @@ export function recordUsage(db: GatewayDatabase, record: UsageRecord): number {
     `INSERT INTO usage (
        userId, ts, model, promptChars, completionChars, status, latencyMs,
        inputTokens, cacheHitTokens, cacheMissTokens, outputTokens, reasoningTokens,
-       sessionId, usageSource, requestKind,
+       sessionId, usageSource, requestKind, provider, fxRate,
        actualMicro, billableMicro, marginMicro, paidFromFreeMicro
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     record.userId,
     new Date().toISOString(),
@@ -62,6 +66,8 @@ export function recordUsage(db: GatewayDatabase, record: UsageRecord): number {
     record.sessionId ?? null,
     record.usageSource ?? (tokens === undefined ? null : 'provider'),
     record.requestKind ?? 'chat',
+    record.provider ?? null,
+    record.fxRate ?? null,
     billing?.actualMicro ?? null,
     billing?.billableMicro ?? null,
     billing?.marginMicro ?? null,

@@ -26,7 +26,19 @@ if (apiKey === '') {
 
 const db = openDatabase(dbPath)
 const payments = paymentEnvFromProcess()
+// The OpenAI upstream is optional: without a key the gateway still runs, and the
+// /openai/ paths answer 503 instead of pretending to work.
+const openaiKey = process.env.OPENAI_API_KEY ?? ''
+const openaiUpstream = openaiKey === ''
+  ? undefined
+  : {
+      upstreamBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+      apiKey: openaiKey,
+      stripPrefix: '/openai',
+    }
+
 const server = createGatewayServer({ db, upstreamBaseUrl, apiKey, dailyLimit, dailyWarnLimit,
+  openaiUpstream,
   payments,
   sponsoredAdFile: process.env.SPONSORED_AD_FILE ?? 'data/sponsored-ad.json' })
 
@@ -48,6 +60,9 @@ if (payments.mode !== 'off') {
 server.listen(port, host, () => {
   console.log(`Mareo gateway listening on http://${host}:${port}`)
   console.log(`Proxying to ${upstreamBaseUrl} with daily limit ${dailyLimit} requests per user (warn at ${dailyWarnLimit})`)
+  console.log(openaiUpstream === undefined
+    ? 'OpenAI upstream: not configured (OPENAI_API_KEY is empty)'
+    : `OpenAI upstream: ${openaiUpstream.upstreamBaseUrl} at /openai/`)
   console.log(`Recharge: mode=${payments.mode}, 用户可见=${paymentsEnabled(payments)}`)
 })
 
