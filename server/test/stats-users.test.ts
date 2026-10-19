@@ -15,6 +15,31 @@ let db: GatewayDatabase
 /** 2026-10-19 12:00 Beijing: a fixed "now" so the cohorts are deterministic. */
 const NOW = new Date('2026-10-19T04:00:00.000Z')
 
+test('retention styling distinguishes missing, zero and full retention', () => {
+  const metrics = collectUsers(db, NOW)
+  metrics.cohorts = [{ day: '2026-10-12', size: 4, d1: undefined, d3: 0, d7: 4 }]
+  const html = renderUsersPage(metrics, { generatedAt: NOW })
+  assert.match(html, /<td class="num">—<\/td>/)
+  assert.match(html, /--heat-opacity:0\.040">0\.0%/)
+  assert.match(html, /--heat-opacity:0\.200">100\.0%/)
+  assert.match(html, /class="badge">样本小/)
+  assert.match(html, /class="depth-grid"/)
+})
+
+test('heavy-user badges preserve payment, signed balances and escaped names', () => {
+  const metrics = collectUsers(db, NOW)
+  metrics.heavy = [{
+    accountId: 'test', displayName: '<script>long name</script>', activeDays: 7,
+    sessions: 50, requests: 1000, actualMicro: 1230000, category: 'coding',
+    walletMicro: -1230000, paid: true, lastActive: NOW.toISOString(),
+  }]
+  const html = renderUsersPage(metrics, { generatedAt: NOW })
+  assert.match(html, /class="num negative">-¥1\.23/)
+  assert.match(html, /class="badge good">是/)
+  assert.match(html, /&lt;script&gt;long name&lt;\/script&gt;/)
+  assert.doesNotMatch(html, /<script>/)
+})
+
 before(() => {
   directory = mkdtempSync(path.join(tmpdir(), 'mareo-users-'))
   db = openDatabase(path.join(directory, 'gateway.db'))

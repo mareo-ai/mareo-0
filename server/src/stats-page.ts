@@ -384,8 +384,8 @@ function dailySeries(db: GatewayDatabase, now: Date, weekIso: string): Metrics['
 
 /** A seven-point line, drawn inline: the page stays a single file with no requests. */
 function spark(series: { day: string; value: number }[]): string {
-  const width = 120
-  const height = 34
+  const width = 480
+  const height = 64
   const max = Math.max(1, ...series.map((point) => point.value))
   const step = series.length > 1 ? width / (series.length - 1) : width
   const points = series.map((point, index) => {
@@ -394,7 +394,7 @@ function spark(series: { day: string; value: number }[]): string {
     return `${x},${y}`
   })
   const last = (points.at(-1) ?? '0,0').split(',')
-  return `<svg class="spark" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" aria-hidden="true">` +
+  return `<svg class="spark" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none" aria-hidden="true">` +
     `<polygon points="0,${height} ${points.join(' ')} ${width},${height}" fill="var(--accent-soft)"></polygon>` +
     `<polyline points="${points.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></polyline>` +
     `<circle cx="${last[0]}" cy="${last[1]}" r="2.2" fill="var(--accent)"></circle></svg>`
@@ -444,6 +444,7 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
   const body = `
   ${status}
 
+  <section class="overview">
   <h2>今日</h2>
   <div class="kpis">
     ${kpi('DAU', String(today.dau), '今天有模型调用的账号')}
@@ -456,38 +457,60 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
     ${stat('今日请求', metrics.requestsToday.toLocaleString('en-US'))}
   </div>
   <p class="note">Session 数按请求携带的会话标识统计，今日覆盖 ${coverage} 的请求（老客户端不上报，因此这是下限）。</p>
+  </section>
 
+  <div class="dashboard-grid">
+  <section class="panel">
   <h2>增长</h2>
+  <h3>访问与下载 · 次数</h3>
   <div class="steps">
     ${funnelStep('官网访问', funnel.views, undefined, '近 7 天 · 执行了 JavaScript 的真实浏览器')}
     ${funnelStep('安装包下载', downloads ?? '—', downloads === undefined ? undefined : funnel.views, downloads === undefined ? '近 7 天 · 本次生成未统计下载数' : '近 7 天 · 访问日志计数')}
   </div>
   <p class="note">以上两步是<b>次数</b>，不是去重人数，所以只给占比、不参与下面的账号转化。</p>
-  <div class="steps" style="margin-top:12px">
+  <h3>新注册账号 · 转化</h3>
+  <div class="steps">
     ${funnelStep('近 7 天新注册账号', funnel.signups, undefined, '这一批人就是下面每一步的分母')}
     ${funnelStep('其中完成首次调用成功', funnel.firstSuccess, funnel.signups, '至少一次模型调用成功')}
     ${funnelStep('其中完成首次充值', funnel.firstPurchase, funnel.firstSuccess, '至少一笔已支付订单')}
   </div>
+  </section>
 
+  <section class="panel finance">
   <h2>商业（今日）</h2>
+  <div class="finance-group">
+  <h3>成本与结算</h3>
   <div class="stats">
     ${stat('真实模型成本', money(finance.actualMicro))}
     ${stat('用户结算消耗', money(finance.billableMicro))}
     ${stat('毛利（钱包口径）', money(finance.marginMicro))}
+  </div>
+  </div>
+  <div class="finance-group">
+  <h3>充值与现金</h3>
+  <div class="stats">
     ${stat('今日充值', money(finance.rechargeMicro))}
     ${stat('现金净额', money(finance.cashNetMicro), finance.cashNetMicro < 0 ? 'warn' : '')}
     ${stat('Cost Recovery', recovery, finance.costRecovery !== undefined && finance.costRecovery < 1 ? 'warn' : '')}
+  </div>
+  </div>
+  <div class="finance-group">
+  <div class="stats">
     ${stat('Wallet 未消耗余额', money(finance.walletBalanceMicro), finance.walletBalanceMicro < 0 ? 'warn' : '')}
+  </div>
   </div>
   <p class="note">
     充值不是收入：它先成为 Wallet 余额，被消费时才形成收入。毛利按已消耗口径（结算消耗 − 真实成本）；现金净额是充值减去今天的真实成本；Cost Recovery = 今日充值 ÷ 今日真实成本。
   </p>
+  </section>
+  </div>
 
   <p class="note">
     这一段缺三个环节的数据，先不展示：<b>首次启动</b>（<code>install_confirmed</code> 只有部分客户端上报）、
 <b>看到充值入口 / 点击充值</b>（客户端还没有这两个事件）、<b>活跃时长</b>（现在只有进程存活时长）。
   </p>
 
+  <section class="panel">
   <h2>用户拿 Mareo 做什么（近 7 天）</h2>
   <div class="mix">
     ${metrics.taskMix.length === 0
@@ -501,6 +524,7 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
   <p class="note">
     分类来自会话标题（关键词规则，确定性、不调用模型），按会话数统计；本周有标题的会话占请求会话的 ${percent(metrics.taskCoverage * 100, 100)}。
   </p>
+  </section>
 `
   return page('ceo', '近 7 天 · 北京日', options.generatedAt, body)
 }
@@ -520,51 +544,60 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
   const body = `
   <p class="status ${metrics.health.ok ? 'ok' : 'warn'}">${metrics.health.ok ? '系统正常' : '⚠ ' + escapeHtml(metrics.health.issues.join(' · '))}</p>
 
+  <section class="overview">
   <h2>稳定性（近 7 天）</h2>
+  <div class="kpis health-kpis">
+    ${kpi('启动成功率', launchRate, `启动次数 ${metrics.launchesWeek.total}`)}
+    ${kpi('引擎异常退出', `${metrics.harnessExitsWeek} 次`, `每千次启动 ${perThousand}`)}
+    ${kpi('模型调用成功率', modelRate, '')}
+    ${kpi('成功率延迟', `p95 ${metrics.latency?.p95 ?? '—'}ms`, `p50 ${metrics.latency?.p50 ?? '—'}ms`)}
+  </div>
   <div class="health">
-    <div>
-      <div class="row"><span>启动成功率</span><span>${launchRate}</span></div>
-      <div class="row"><span>引擎异常退出</span><span>${metrics.harnessExitsWeek} 次 · 每千次启动 ${perThousand}</span></div>
-      <div class="row"><span>模型调用成功率</span><span>${modelRate}</span></div>
-      <div class="row"><span>成功率延迟</span><span>p50 ${metrics.latency?.p50 ?? '—'}ms · p95 ${metrics.latency?.p95 ?? '—'}ms</span></div>
-    </div>
     <div>
       <div class="row"><span>额度用尽的请求</span><span>${metrics.limitedWeek}</span></div>
       <div class="row"><span>登录结果</span><span>${escapeHtml(signinText)}</span></div>
       <div class="row"><span>字符量（提示 + 回复）</span><span>${metrics.charsWeek.toLocaleString('en-US')}</span></div>
-      <div class="row"><span>首次调用即成功</span><span>${metrics.firstTryOk} / ${metrics.accountsWithUsage}</span></div>
     </div>
     <div>
-      <div class="row"><span>启动次数</span><span>${metrics.launchesWeek.total}</span></div>
+      <div class="row"><span>首次调用即成功</span><span>${metrics.firstTryOk} / ${metrics.accountsWithUsage}</span></div>
       <div class="row"><span>用量异常（今日超过 500 次）</span><span>${metrics.heavyToday.length === 0 ? '无' : metrics.heavyToday.length + ' 个账号'}</span></div>
     </div>
   </div>
+  </section>
 
+  <div class="dashboard-grid">
+  <section class="panel">
   <h2>请求结果（近 7 天）</h2>
   ${scroll(`<table>
     <caption class="sr-only">近 7 天的请求结果分布</caption>
-    <tr><th scope="col">状态</th><th scope="col">请求数</th></tr>
+    <tr><th scope="col">状态</th><th scope="col" class="num">请求数</th></tr>
     ${metrics.statusWeek.length === 0
     ? '<tr><th scope="row">暂无数据</th><td class="num">—</td></tr>'
     : metrics.statusWeek.map((row) => `<tr><th scope="row">HTTP ${row.status}</th><td class="num">${row.n.toLocaleString('en-US')}</td></tr>`).join('')}</table>`)}
+  </section>
 
+  <section class="panel">
   <h2>每日请求（近 7 天）</h2>
   <div class="trends">
     ${trend('模型请求', metrics.series.map((row) => ({ day: row.day, value: row.requests })), metrics.requestsWeek.toLocaleString('en-US'))}
     ${trend('活跃账号', metrics.series.map((row) => ({ day: row.day, value: row.active })), String(metrics.activeWeek))}
     ${trend('新增安装', metrics.series.map((row) => ({ day: row.day, value: row.installs })), String(metrics.funnelWeek.launched))}
   </div>
+  </section>
+  </div>
 
+  <section class="panel">
   <h2>版本与平台（近 7 天启动）</h2>
   ${scroll(`<table>
     <caption class="sr-only">近 7 天启动的版本与平台分布</caption>
-    <tr><th scope="col">版本 · 平台</th><th scope="col">启动次数</th></tr>
+    <tr><th scope="col">版本 · 平台</th><th scope="col" class="num">启动次数</th></tr>
     ${metrics.versions.length === 0
       ? '<tr><th scope="row">版本分布</th><td class="num">暂无数据</td></tr>'
       : metrics.versions.map((row) => `<tr><th scope="row">${escapeHtml(row.version)} · ${escapeHtml(row.platform)}</th><td class="num">${row.n}</td></tr>`).join('')}</table>`)}
   <div class="stats">
     ${metrics.platforms.map((row) => stat(row.platform, `${row.n} · ${percent(row.n, platformTotal)}`)).join('')}
   </div>
+  </section>
 `
   return page('health', '近 7 天 · 工程口径', options.generatedAt, body)
 }

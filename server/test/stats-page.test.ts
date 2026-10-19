@@ -24,6 +24,38 @@ after(() => {
 
 const GENERATED = new Date('2026-09-14T12:00:00Z')
 
+test('visual grouping preserves financial signs, precision and missing recovery', () => {
+  const metrics = withMetrics({ money: {
+    actualMicro: 1, billableMicro: 1_300_000, marginMicro: 1_299_999,
+    rechargeMicro: 0, cashNetMicro: -1, costRecovery: undefined, walletBalanceMicro: -1_230_000,
+  } })
+  const html = renderCeoPage(metrics, { generatedAt: GENERATED })
+  const values = [...html.matchAll(/class="stat-value">([^<]*)</g)].map(match => match[1])
+  assert.deepEqual(values.slice(-7), ['¥0.00', '¥1.30', '¥1.30', '¥0.00', '-¥0.00', '—', '-¥1.23'])
+  assert.match(html, /class="dashboard-grid"/)
+  assert.equal((html.match(/class="finance-group"/g) ?? []).length, 3)
+  assert.match(html, /充值不是收入/)
+  metrics.money.costRecovery = 0
+  assert.match(renderCeoPage(metrics, { generatedAt: GENERATED }), /class="stat-value">0\.0%</)
+  metrics.money.walletBalanceMicro = 123_456_789_000_000
+  assert.match(renderCeoPage(metrics, { generatedAt: GENERATED }), /¥123456789\.00/)
+})
+
+test('health visuals retain rates, latency values and keyboard-accessible tables', () => {
+  const html = renderHealthPage(withMetrics({
+    launchesWeek: { total: 10, ok: 8 }, requestsWeek: 100, okWeek: 95,
+    harnessExitsWeek: 1, latency: { p50: 100, p95: 2000 },
+  }), { generatedAt: GENERATED })
+  assert.match(html, /class="kpi-value">80\.0%</)
+  assert.match(html, /class="kpi-value">95\.0%</)
+  assert.match(html, /每千次启动 125\.0/)
+  assert.match(html, /p95 2000ms/)
+  assert.match(html, /p50 100ms/)
+  assert.match(html, /tabindex="0" role="region" aria-label="数据表格，可横向滚动"/)
+  assert.match(html, /:focus-visible/)
+  assert.match(html, /prefers-color-scheme:dark/)
+})
+
 function withMetrics(overrides: Partial<Metrics>): Metrics {
   return { ...collect(db, GENERATED), ...overrides }
 }
