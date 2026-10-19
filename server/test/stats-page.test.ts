@@ -25,13 +25,17 @@ test('the page reports aggregates and escapes anything a client controls', () =>
 
   assert.match(page, /<html lang="zh-CN">/)
   assert.match(page, /<meta name="robots" content="noindex">/)
-  assert.match(page, /官网浏览（近 7 天）/)
-  assert.match(page, /额度用尽的请求/)
-  assert.match(page, /2026-09-14T12:00:00.000Z/)
-  assert.match(page, /安装包下载（近 7 天）/)
-  assert.match(page, /今日新增 0/)                        // deltas are always shown
-  assert.match(page, /累计账号/)
-  assert.match(page, /用量异常（今日超过 500 次的账户）/)
+  // The five layers of the page, in the order a reader meets them.
+  assert.match(page, /本周/)                                // the one-sentence verdict
+  assert.match(page, /新增安装/)
+  assert.match(page, /趋势/)
+  assert.match(page, /关键环节/)                            // staged counts, not a fake funnel
+  assert.match(page, /官网访问/)
+  assert.match(page, /完成安装/)
+  assert.match(page, /今日 0 · 累计 0/)                      // windows are spelled out
+  assert.match(page, /近 7 天 · 执行 JS 的真实浏览器/)
+  assert.match(page, /平台分布/)
+  assert.match(page, /工程健康/)
   // No external requests: the page works offline and leaks nothing by loading.
   assert.equal(/<script|src="http|href="http/.test(page), false)
 
@@ -43,10 +47,34 @@ test('the page reports aggregates and escapes anything a client controls', () =>
   assert.match(hostile, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
 })
 
+test('the verdict names the broken step when traffic does not turn into installs', () => {
+  const empty = collect(openDatabase(path.join(directory, 'verdict.db')))
+  const page = renderStatsPage(
+    {
+      ...empty,
+      funnelWeek: { views: 42, installs: 0, accounts: 0, withUsage: 0 },
+      siteWeek: { total: 42, byPath: [] },
+      accounts: 3,
+      requestsWeek: 0,
+    },
+    { generatedAt: new Date('2026-09-14T12:00:00Z') },
+  )
+  assert.match(page, /本周官网有 42 次访问，没有新增安装：断点在「访问 → 安装」/)
+  assert.match(page, /class="verdict warn"/)
+})
+
+test('the trend series has one row per day, oldest first', () => {
+  const metrics = collect(db, new Date('2026-09-14T12:00:00Z'))
+  assert.equal(metrics.series.length, 7)
+  const days = metrics.series.map((row) => row.day)
+  assert.deepEqual(days, [...days].sort(), '旧的日子在前')
+  assert.equal(new Set(days).size, 7)
+})
+
 test('an empty database still renders a usable page', () => {
   const empty = openDatabase(path.join(directory, 'empty.db'))
   const page = renderStatsPage(collect(empty), { generatedAt: new Date('2026-09-14T12:00:00Z') })
-  assert.match(page, /累计安装/)
+  assert.match(page, /新增安装/)
   assert.match(page, /暂无数据/)
   empty.close()
 })
