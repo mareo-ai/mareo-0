@@ -11,19 +11,11 @@ import { openDatabase, type GatewayDatabase } from './db.js'
 import { dayStamp, dayStampDaysAgo, startOfDay, startOfDayDaysAgo } from './clock.js'
 import { siteViewsSince } from './site-views.js'
 import { categorizeTask } from './stats-tasks.js'
+import { collectUsers, renderUsersPage } from './stats-users.js'
 import { walletTotals } from './wallet.js'
+import { escapeHtml, kpi, money, page, percent, stat, table } from './stats-html.js'
 
 const dbPath = process.env.DB_PATH ?? 'data/mareo.db'
-
-/** Escapes every interpolated value: version and platform come from clients. */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
 
 export interface Metrics {
   installs: number
@@ -390,26 +382,6 @@ function dailySeries(db: GatewayDatabase, now: Date, weekIso: string): Metrics['
   return [...rows.values()]
 }
 
-/** Micro-yuan as a person reads it, and every interpolated value escaped before it lands in HTML. */
-function money(micro: number): string {
-  return (micro < 0 ? '-¥' : '¥') + (Math.abs(micro) / 1e6).toFixed(2)
-}
-
-function percent(part: number, whole: number): string {
-  return whole === 0 ? '—' : `${((part / whole) * 100).toFixed(1)}%`
-}
-
-function kpi(label: string, value: string, note: string): string {
-  return `<div class="kpi"><span class="kpi-label">${escapeHtml(label)}</span>` +
-    `<strong class="kpi-value">${escapeHtml(value)}</strong>` +
-    `<span class="kpi-note">${escapeHtml(note)}</span></div>`
-}
-
-function stat(label: string, value: string, tone = ''): string {
-  return `<div class="stat${tone === '' ? '' : ' ' + tone}"><span class="stat-label">${escapeHtml(label)}</span>` +
-    `<span class="stat-value">${escapeHtml(value)}</span></div>`
-}
-
 /** A seven-point line, drawn inline: the page stays a single file with no requests. */
 function spark(series: { day: string; value: number }[]): string {
   const width = 120
@@ -441,128 +413,6 @@ function funnelStep(label: string, value: number, previous: number | undefined, 
   return `<div class="step"><div class="step-head"><span class="step-label">${escapeHtml(label)}</span>` +
     `<span class="step-value">${value.toLocaleString('en-US')}</span></div>` +
     `<div class="step-note">${escapeHtml(note)}${conversion === '' ? '' : ' · ' + escapeHtml(conversion)}</div></div>`
-}
-
-function table(items: [string, string][]): string {
-  return `<table>${items
-    .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`)
-    .join('')}</table>`
-}
-
-/** The shell both pages share: same tokens, same rhythm, one link back to the other page. */
-function page(title: string, pageName: 'ceo' | 'health', generatedAt: Date, body: string): string {
-  const nav = pageName === 'ceo'
-    ? '<a href="/stats/health/">工程健康</a>'
-    : '<a href="/stats/">返回经营看板</a>'
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>${escapeHtml(title)}</title>
-<style>
-:root {
-  color-scheme: light dark;
-  --bg: #fcfcfd; --panel: #fff; --border: #e6e8ee; --border-soft: #f1f2f6;
-  --text: #16181d; --muted: #6b7280; --faint: #9aa1ac;
-  --accent: #2f5bea; --accent-soft: rgba(47, 91, 234, 0.12);
-  --warn: #a86400; --warn-soft: rgba(168, 100, 0, 0.10);
-  --good: #157347; --good-soft: rgba(21, 115, 71, 0.10);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1014; --panel: #15181e; --border: #262b34; --border-soft: #1e232b;
-    --text: #edeff3; --muted: #98a0ad; --faint: #6f7885;
-    --accent: #7c96ff; --accent-soft: rgba(124, 150, 255, 0.16);
-    --warn: #e0a44a; --warn-soft: rgba(224, 164, 74, 0.12);
-    --good: #57c98d; --good-soft: rgba(87, 201, 141, 0.12);
-  }
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0; padding: 40px 24px 72px; background: var(--bg); color: var(--text);
-  font: 14px/1.65 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-variant-numeric: tabular-nums;
-}
-.wrap { max-width: 1000px; margin: 0 auto; }
-header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
-h1 { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
-.window { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 10px; }
-.meta { color: var(--faint); font-size: 12px; margin: 6px 0 0; }
-.status { margin: 18px 0 0; padding: 9px 14px; border-radius: 8px; font-size: 13px;
-  border: 1px solid var(--border); background: var(--panel); display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-.status.ok { border-color: color-mix(in srgb, var(--good) 35%, var(--border)); background: var(--good-soft); color: var(--good); }
-.status.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); background: var(--warn-soft); color: var(--warn); }
-.status a { color: inherit; }
-h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); margin: 38px 0 12px; }
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 12px; }
-.kpi { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 14px 16px; display: grid; gap: 2px; }
-.kpi-label { font-size: 12px; color: var(--muted); }
-.kpi-value { font-size: 27px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; }
-.kpi-note { font-size: 12px; color: var(--faint); }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; margin-top: 12px; }
-.stat { border: 1px solid var(--border); border-radius: 9px; background: var(--panel); padding: 10px 13px; display: grid; gap: 1px; }
-.stat-label { font-size: 12px; color: var(--muted); }
-.stat-value { font-size: 17px; font-weight: 600; }
-.stat.warn .stat-value { color: var(--warn); }
-.trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
-.trend { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 12px 14px 8px; }
-.trend-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-.trend-total { font-size: 15px; font-weight: 600; }
-.trend-days { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint); margin-top: -4px; }
-.spark { display: block; overflow: visible; }
-.steps { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
-.step { padding: 11px 16px; border-bottom: 1px solid var(--border-soft); display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; align-items: baseline; }
-.step:last-child { border-bottom: 0; }
-.step-label { font-size: 13px; }
-.step-value { font-size: 16px; font-weight: 600; text-align: right; }
-.step-note { grid-column: 1 / -1; font-size: 12px; color: var(--faint); }
-.mix { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
-.mix-row { padding: 10px 16px; border-bottom: 1px solid var(--border-soft); display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; }
-.mix-row:last-child { border-bottom: 0; }
-.mix-label { font-size: 13px; }
-.mix-value { font-size: 13px; color: var(--muted); text-align: right; }
-.bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--border-soft); overflow: hidden; }
-.bar span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-.note { font-size: 12px; color: var(--faint); margin: 10px 0 0; line-height: 1.75; }
-details { margin-top: 38px; border-top: 1px solid var(--border); padding-top: 12px; }
-summary { cursor: pointer; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); }
-.summary-hint { float: right; font-weight: 400; letter-spacing: 0; color: var(--faint); }
-.health { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px 24px; margin: 14px 0 0; }
-.health .row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--border-soft); }
-.health .row span:first-child { color: var(--muted); }
-.health .row span:last-child { font-weight: 500; }
-table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
-tr:last-child th, tr:last-child td { border-bottom: 0; }
-th { font-weight: 400; color: var(--muted); }
-td { text-align: right; }
-footer { margin-top: 44px; color: var(--faint); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
-footer a { color: inherit; }
-@media (max-width: 720px) {
-  body { padding: 24px 16px 48px; }
-  .kpi-value { font-size: 24px; }
-  .trends, .health { grid-template-columns: 1fr; }
-  .kpi, .trend, .step, .stat { min-width: 0; }
-}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header>
-    <h1>${escapeHtml(title)}</h1>
-    <span class="window">${pageName === 'ceo' ? '近 7 天 · 北京日' : '近 7 天 · 工程口径'}</span>
-  </header>
-  <p class="meta">生成于 ${escapeHtml(generatedAt.toISOString())}（UTC）· 全部为聚合值，不含任何账号信息</p>
-${body}
-  <footer>
-    数据来源：Mareo 网关的聚合统计。${nav} · <a href="/">返回首页</a> · <a href="/privacy.html">隐私说明</a>
-  </footer>
-</div>
-</body>
-</html>
-`
 }
 
 /**
@@ -643,7 +493,7 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
     分类来自会话标题（关键词规则，确定性、不调用模型），按会话数统计；本周有标题的会话占请求会话的 ${percent(metrics.taskCoverage * 100, 100)}。
   </p>
 `
-  return page('Mareo 经营看板', 'ceo', options.generatedAt, body)
+  return page('Mareo 经营看板', [{ href: '/stats/users/', label: '用户与留存' }, { href: '/stats/health/', label: '工程健康' }], '近 7 天 · 北京日', options.generatedAt, body)
 }
 
 /** Everything that answers "is it working", kept off the business page. */
@@ -701,7 +551,7 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
     ${metrics.platforms.map((row) => stat(row.platform, `${row.n} · ${percent(row.n, platformTotal)}`)).join('')}
   </div>
 `
-  return page('Mareo 工程健康', 'health', options.generatedAt, body)
+  return page('Mareo 工程健康', [{ href: '/stats/', label: '返回经营看板' }, { href: '/stats/users/', label: '用户与留存' }], '近 7 天 · 工程口径', options.generatedAt, body)
 }
 
 /** Category ids are stable keys; the label is what a reader sees. */
@@ -731,7 +581,11 @@ function main(): void {
   const metrics = collect(db)
   const generatedAt = new Date()
   const options = { downloads: Number.isFinite(downloads) ? downloads : undefined, generatedAt }
-  const html = pageName === 'health' ? renderHealthPage(metrics, options) : renderCeoPage(metrics, options)
+  const html = pageName === 'health'
+    ? renderHealthPage(metrics, options)
+    : pageName === 'users'
+      ? renderUsersPage(collectUsers(db), options)
+      : renderCeoPage(metrics, options)
   process.stdout.write(html)
 }
 

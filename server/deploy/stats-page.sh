@@ -4,8 +4,8 @@
 #
 #   */15 * * * * cd /srv/mareo/server/deploy && ./stats-page.sh >> backups/stats.log 2>&1
 #
-# Two pages, two audiences: the business dashboard and the engineering health
-# page. They are static snapshots on purpose — the database stays unreachable
+# Three pages, two audiences: the business dashboard, the users page behind it,
+# and the engineering health page. They are static snapshots on purpose — the database stays unreachable
 # from the internet, and a failed generation leaves the previous page in place.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -30,4 +30,5 @@ publish() {
 
 publish ceo "$site_dir/index.html"
 publish health "$site_dir/health/index.html"
+publish users "$site_dir/users/index.html"
 echo "$(date -Is) stats pages regenerated (downloads=$downloads)"
