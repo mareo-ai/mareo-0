@@ -288,10 +288,14 @@ function categoryLabel(category: string): string {
 }
 
 export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Date }): string {
-  const retention = (part: number | undefined, size: number): string =>
-    part === undefined ? '—' : size === 0 ? '—' : percent(part, size)
+  // Missing cohorts remain unshaded; a measured zero keeps its numeric label.
+  const retentionCell = (part: number | undefined, size: number): string =>
+    part === undefined || size === 0
+      ? '<td class="num">—</td>'
+      : `<td class="num retention-cell" style="--heat-opacity:${(0.04 + Math.min(1, part / size) * 0.16).toFixed(3)}">${percent(part, size)}</td>`
 
   const body = `
+  <section class="overview">
   <h2>活跃规模</h2>
   <div class="kpis">
     ${kpi('DAU', String(metrics.dau), '今天有模型调用')}
@@ -303,48 +307,65 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
     ${stat('每活跃用户每周 Session', metrics.sessionsPerActiveWeek.toFixed(1))}
   </div>
   <p class="note">Session 只统计携带会话标识的请求，本周覆盖 ${percent(metrics.sessionCoverage * 100, 100)}，因此 Session 相关指标是下限。</p>
+  </section>
 
+  <section class="panel">
   <h2>留存（按首次调用成功分 cohort）</h2>
-  ${scroll(`<table>
+  ${scroll(`<table class="retention-table">
     ${tableCaption('按首次调用成功日分组的留存')}
-    <tr><th scope="col">首次使用</th><th scope="col">新增</th><th scope="col">D1</th><th scope="col">D3</th><th scope="col">D7</th></tr>
+    <tr><th scope="col">首次使用</th><th scope="col" class="num">新增</th><th scope="col" class="num">D1</th><th scope="col" class="num">D3</th><th scope="col" class="num">D7</th></tr>
     ${metrics.cohorts.filter((row) => row.size > 0).length === 0
       ? '<tr><th scope="row">近两周没有新的首次成功调用</th><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>'
       : metrics.cohorts
           .filter((row) => row.size > 0)
-          .map((row) => `<tr><th scope="row">${escapeHtml(row.day)}${row.size < 5 ? ' · 样本小' : ''}</th>` +
-            `<td class="num">${row.size}</td><td class="num">${retention(row.d1, row.size)}</td>` +
-            `<td class="num">${retention(row.d3, row.size)}</td><td class="num">${retention(row.d7, row.size)}</td></tr>`)
+          .map((row) => `<tr><th scope="row">${escapeHtml(row.day)}${row.size < 5 ? ' <span class="badge">样本小</span>' : ''}</th>` +
+            `<td class="num">${row.size}</td>${retentionCell(row.d1, row.size)}` +
+            `${retentionCell(row.d3, row.size)}${retentionCell(row.d7, row.size)}</tr>`)
           .join('')}
   </table>`)}
   <p class="note">只统计首次成功调用落在该日、且有会话活动的账号；尚未到期的 D1/D3/D7 显示为 —。</p>
+  </section>
 
+  <section class="panel">
   <h2>使用深度</h2>
+  <div class="depth-grid">
+  <div>
+  <h3>使用频率</h3>
   <div class="stats">
     ${stat('每 DAU Session', metrics.sessionsPerDau.toFixed(2))}
+    ${stat('重度用户', String(metrics.heavyCount))}
+  </div>
+  </div>
+  <div>
+  <h3>成本分布</h3>
+  <div class="stats">
     ${stat('每 Session 真实成本', money(metrics.costPerSessionMicro))}
     ${stat('每用户每日真实成本', money(metrics.costPerUserDayMicro))}
     ${stat('用户周成本 P50', money(metrics.costPercentiles.p50Micro))}
     ${stat('用户周成本 P90', money(metrics.costPercentiles.p90Micro))}
     ${stat('用户周成本 P99', money(metrics.costPercentiles.p99Micro))}
-    ${stat('重度用户', String(metrics.heavyCount), '近 7 天请求 ≥ ' + metrics.heavyThreshold)}
   </div>
+  </div>
+  </div>
+  </section>
 
+  <section class="panel">
   <h2>重度用户（按真实成本排序）</h2>
   ${metrics.heavy.length === 0
     ? '<p class="note">暂无达到阈值的账号。</p>'
     : `${scroll(`<table>
     ${tableCaption('按真实成本排序的重度账号')}
-    <tr><th scope="col">用户</th><th scope="col">活跃天数</th><th scope="col">Session</th><th scope="col">真实成本</th><th scope="col">主线任务</th><th scope="col">Wallet</th><th scope="col">付费</th><th scope="col">最近活跃</th></tr>
+    <tr><th scope="col">用户</th><th scope="col" class="num">活跃天数</th><th scope="col" class="num">Session</th><th scope="col" class="num">真实成本</th><th scope="col">主线任务</th><th scope="col" class="num">Wallet</th><th scope="col">付费</th><th scope="col">最近活跃</th></tr>
     ${metrics.heavy
       .map((user) => `<tr><th scope="row">${escapeHtml(user.displayName)}</th>` +
         `<td class="num">${user.activeDays}</td><td class="num">${user.sessions}</td>` +
         `<td class="num">${money(user.actualMicro)}</td><td>${escapeHtml(categoryShort(user.category))}</td>` +
-        `<td class="num">${money(user.walletMicro)}</td><td>${user.paid ? '是' : '否'}</td>` +
+        `<td class="num${user.walletMicro < 0 ? ' negative' : ''}">${money(user.walletMicro)}</td><td><span class="badge${user.paid ? ' good' : ''}">${user.paid ? '是' : '否'}</span></td>` +
         `<td>${escapeHtml(lastActiveLabel(user.lastActive))}</td></tr>`)
       .join('')}
   </table>`)}`}
   <p class="note">不含任何对话内容：主线任务来自会话标题的关键词分类，钱包余额与是否付费来自账本。</p>
+  </section>
 `
   return page('users', '近 7 天 · 北京日', options.generatedAt, body)
 }
