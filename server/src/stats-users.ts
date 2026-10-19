@@ -13,7 +13,7 @@
 import type { GatewayDatabase } from './db.js'
 import { dayStamp, dayStampDaysAgo } from './clock.js'
 import { categorizeTask } from './stats-tasks.js'
-import { escapeHtml, kpi, money, page, percent, stat, tableCaption } from './stats-html.js'
+import { escapeHtml, kpi, money, page, percent, scroll, stat, tableCaption } from './stats-html.js'
 import { walletBalanceMicro } from './wallet.js'
 
 /** Requests in the last seven days at or above this mark count as a heavy user. */
@@ -305,7 +305,7 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
   <p class="note">Session 只统计携带会话标识的请求，本周覆盖 ${percent(metrics.sessionCoverage * 100, 100)}，因此 Session 相关指标是下限。</p>
 
   <h2>留存（按首次调用成功分 cohort）</h2>
-  <table>
+  ${scroll(`<table>
     ${tableCaption('按首次调用成功日分组的留存')}
     <tr><th scope="col">首次使用</th><th scope="col">新增</th><th scope="col">D1</th><th scope="col">D3</th><th scope="col">D7</th></tr>
     ${metrics.cohorts.filter((row) => row.size > 0).length === 0
@@ -316,7 +316,7 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
             `<td class="num">${row.size}</td><td class="num">${retention(row.d1, row.size)}</td>` +
             `<td class="num">${retention(row.d3, row.size)}</td><td class="num">${retention(row.d7, row.size)}</td></tr>`)
           .join('')}
-  </table>
+  </table>`)}
   <p class="note">只统计首次成功调用落在该日、且有会话活动的账号；尚未到期的 D1/D3/D7 显示为 —。</p>
 
   <h2>使用深度</h2>
@@ -333,7 +333,7 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
   <h2>重度用户（按真实成本排序）</h2>
   ${metrics.heavy.length === 0
     ? '<p class="note">暂无达到阈值的账号。</p>'
-    : `<table>
+    : `${scroll(`<table>
     ${tableCaption('按真实成本排序的重度账号')}
     <tr><th scope="col">用户</th><th scope="col">活跃天数</th><th scope="col">Session</th><th scope="col">真实成本</th><th scope="col">主线任务</th><th scope="col">Wallet</th><th scope="col">付费</th><th scope="col">最近活跃</th></tr>
     ${metrics.heavy
@@ -343,14 +343,8 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
         `<td class="num">${money(user.walletMicro)}</td><td>${user.paid ? '是' : '否'}</td>` +
         `<td>${escapeHtml(lastActiveLabel(user.lastActive))}</td></tr>`)
       .join('')}
-  </table>`}
+  </table>`)}`}
   <p class="note">不含任何对话内容：主线任务来自会话标题的关键词分类，钱包余额与是否付费来自账本。</p>
 `
-  return page(
-    'Mareo 用户与留存',
-    [{ href: '/stats/', label: '经营看板' }, { href: '/stats/health/', label: '工程健康' }],
-    '近 7 天 · 北京日',
-    options.generatedAt,
-    body,
-  )
+  return page('users', '近 7 天 · 北京日', options.generatedAt, body)
 }

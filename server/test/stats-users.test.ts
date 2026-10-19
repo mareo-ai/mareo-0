@@ -112,7 +112,7 @@ test('a heavy user is one above the weekly request threshold, listed by cost', (
 test('the page states what it cannot see', () => {
   const metrics = collectUsers(db, NOW)
   const page = renderUsersPage(metrics, { generatedAt: NOW })
-  assert.match(page, /Mareo 用户与留存/)
+  assert.match(page, /用户与留存/)
   assert.match(page, /DAU/)
   assert.match(page, /WAU/)
   assert.match(page, /MAU/)
@@ -128,7 +128,9 @@ test('the page states what it cannot see', () => {
   assert.match(page, /scope="col"/)
   assert.match(page, /scope="row"/)
   assert.match(page, /<a class="skip" href="#main">/)
-  assert.match(page, /<main id="main">/)
+  assert.match(page, /class="topbar"/, '导航在首屏')
+  assert.match(page, /aria-current="page">用户与留存</, '当前页要标记出来')
+  assert.match(page, /<main id="main"/)
 })
 
 test('an empty database still renders the page', () => {

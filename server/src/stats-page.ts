@@ -13,7 +13,7 @@ import { siteViewsSince } from './site-views.js'
 import { categorizeTask } from './stats-tasks.js'
 import { collectUsers, renderUsersPage } from './stats-users.js'
 import { walletTotals } from './wallet.js'
-import { escapeHtml, kpi, money, page, percent, stat, table } from './stats-html.js'
+import { escapeHtml, kpi, money, page, percent, scroll, stat, table } from './stats-html.js'
 
 const dbPath = process.env.DB_PATH ?? 'data/mareo.db'
 
@@ -502,7 +502,7 @@ export function renderCeoPage(metrics: Metrics, options: { downloads?: number; g
     分类来自会话标题（关键词规则，确定性、不调用模型），按会话数统计；本周有标题的会话占请求会话的 ${percent(metrics.taskCoverage * 100, 100)}。
   </p>
 `
-  return page('Mareo 经营看板', [{ href: '/stats/users/', label: '用户与留存' }, { href: '/stats/health/', label: '工程健康' }], '近 7 天 · 北京日', options.generatedAt, body)
+  return page('ceo', '近 7 天 · 北京日', options.generatedAt, body)
 }
 
 /** Everything that answers "is it working", kept off the business page. */
@@ -541,12 +541,12 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
   </div>
 
   <h2>请求结果（近 7 天）</h2>
-  <table>
+  ${scroll(`<table>
     <caption class="sr-only">近 7 天的请求结果分布</caption>
     <tr><th scope="col">状态</th><th scope="col">请求数</th></tr>
     ${metrics.statusWeek.length === 0
     ? '<tr><th scope="row">暂无数据</th><td class="num">—</td></tr>'
-    : metrics.statusWeek.map((row) => `<tr><th scope="row">HTTP ${row.status}</th><td class="num">${row.n.toLocaleString('en-US')}</td></tr>`).join('')}</table>
+    : metrics.statusWeek.map((row) => `<tr><th scope="row">HTTP ${row.status}</th><td class="num">${row.n.toLocaleString('en-US')}</td></tr>`).join('')}</table>`)}
 
   <h2>每日请求（近 7 天）</h2>
   <div class="trends">
@@ -556,17 +556,17 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
   </div>
 
   <h2>版本与平台（近 7 天启动）</h2>
-  <table>
+  ${scroll(`<table>
     <caption class="sr-only">近 7 天启动的版本与平台分布</caption>
     <tr><th scope="col">版本 · 平台</th><th scope="col">启动次数</th></tr>
     ${metrics.versions.length === 0
       ? '<tr><th scope="row">版本分布</th><td class="num">暂无数据</td></tr>'
-      : metrics.versions.map((row) => `<tr><th scope="row">${escapeHtml(row.version)} · ${escapeHtml(row.platform)}</th><td class="num">${row.n}</td></tr>`).join('')}</table>
+      : metrics.versions.map((row) => `<tr><th scope="row">${escapeHtml(row.version)} · ${escapeHtml(row.platform)}</th><td class="num">${row.n}</td></tr>`).join('')}</table>`)}
   <div class="stats">
     ${metrics.platforms.map((row) => stat(row.platform, `${row.n} · ${percent(row.n, platformTotal)}`)).join('')}
   </div>
 `
-  return page('Mareo 工程健康', [{ href: '/stats/', label: '返回经营看板' }, { href: '/stats/users/', label: '用户与留存' }], '近 7 天 · 工程口径', options.generatedAt, body)
+  return page('health', '近 7 天 · 工程口径', options.generatedAt, body)
 }
 
 /** Category ids are stable keys; the label is what a reader sees. */

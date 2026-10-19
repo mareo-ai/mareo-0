@@ -45,7 +45,7 @@ test('the business page leads with the four questions of the day', () => {
     { downloads: 4, generatedAt: GENERATED },
   )
 
-  assert.match(page, /<h1>Mareo 经营看板<\/h1>/)
+  assert.match(page, /<h1>经营看板<\/h1>/)
   // The four numbers, in order, with their definitions beside them.
   assert.match(page, /DAU/)
   assert.match(page, /新增激活/)
@@ -133,8 +133,8 @@ test('the task mix is drawn from titles, and says how much of the week it covers
 test('an empty database renders both pages', () => {
   const ceo = renderCeoPage(collect(db, GENERATED), { generatedAt: GENERATED })
   const health = renderHealthPage(collect(db, GENERATED), { generatedAt: GENERATED })
-  assert.match(ceo, /Mareo 经营看板/)
-  assert.match(health, /Mareo 工程健康/)
+  assert.match(ceo, /经营看板/)
+  assert.match(health, /工程健康/)
   assert.match(ceo, /暂无带标题的会话/)
   assert.match(health, /暂无数据/)
 })
@@ -167,7 +167,7 @@ test('the pages meet the accessibility floor the guidelines set', () => {
   for (const page of [ceo, health]) {
     assert.match(page, /<html lang="zh-CN">/)
     assert.match(page, /<a class="skip" href="#main">跳到主要内容<\/a>/, '键盘用户要能跳过页头')
-    assert.match(page, /<main id="main">/)
+    assert.match(page, /<main id="main"/)
     assert.match(page, /<meta name="theme-color"/)
     assert.equal((page.match(/<h1[ >]/g) ?? []).length, 1, '一页只有一个 h1')
   }
@@ -184,6 +184,21 @@ test('the pages meet the accessibility floor the guidelines set', () => {
     { generatedAt: GENERATED },
   )
   assert.match(withBars, /class="bar" aria-hidden="true"/)
+})
+
+test('every page carries its navigation at the top', () => {
+  const ceo = renderCeoPage(withMetrics({}), { generatedAt: GENERATED })
+  const health = renderHealthPage(withMetrics({}), { generatedAt: GENERATED })
+  for (const [page, current] of [[ceo, '经营看板'], [health, '工程健康']] as const) {
+    const nav = page.indexOf('class="topbar"')
+    const main = page.indexOf('<main')
+    assert.ok(nav !== -1 && nav < main, '导航在正文之前，第一屏就能看到')
+    for (const label of ['经营看板', '用户与留存', '工程健康']) {
+      assert.match(page, new RegExp(`class="tab"[^>]*>${label}<`), `导航缺少 ${label}`)
+    }
+    assert.match(page, new RegExp(`aria-current="page">${current}<`), '当前页要标记出来')
+    assert.match(page, /<nav class="tabs" aria-label="运营页面">/)
+  }
 })
 
 test('neither page loads anything from outside', () => {

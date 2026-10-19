@@ -11,5 +11,5 @@
 这 10 套是为**幻灯片/文档**设计的：每套 4 个颜色、字体固定 DejaVu Sans、没有深色模式。
 数据看板需要的是：三级文字都要过 4.5:1、数字等宽对齐、语义色（正常/告警）、明暗两套 token。
 
-所以这里只借用 **Modern Minimalist** 的"灰阶纪律"（单一强调色、清晰边界、无阴影、无渐变），
-自定义出 [`themes/ink-and-paper.md`](../../themes/ink-and-paper.md)：纸感底色 + 墨色正文 + 深青强调色 + 暖黑深色模式。
+最终三个页面的视觉按**主流 SaaS 看板**做（Vercel token + 吸顶导航），见 [`themes/dashboard.md`](../../themes/dashboard.md)。
+这里的 10 套主题保留作参考，未直接采用。

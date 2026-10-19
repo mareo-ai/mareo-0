@@ -1,6 +1,6 @@
 # 产品页面设计原则（Mareo）
 
-> 视觉实现（颜色 token、版式、字体）见 [`themes/ink-and-paper.md`](./themes/ink-and-paper.md)；
+> 视觉实现（颜色 token、版式、组件）见 [`themes/dashboard.md`](./themes/dashboard.md)；
 > 现成的主题库收录在 [`vendor/theme-factory/`](./vendor/theme-factory/)（Apache-2.0）。
 
 这份文档是 Mareo 运营页面的**取向标准**：它决定"什么该出现、什么该克制"，与
