@@ -545,8 +545,8 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
     <caption class="sr-only">近 7 天的请求结果分布</caption>
     <tr><th scope="col">状态</th><th scope="col">请求数</th></tr>
     ${metrics.statusWeek.length === 0
-    ? '<tr><th scope="row">暂无数据</th><td>—</td></tr>'
-    : metrics.statusWeek.map((row) => `<tr><th scope="row">HTTP ${row.status}</th><td>${row.n.toLocaleString('en-US')}</td></tr>`).join('')}</table>
+    ? '<tr><th scope="row">暂无数据</th><td class="num">—</td></tr>'
+    : metrics.statusWeek.map((row) => `<tr><th scope="row">HTTP ${row.status}</th><td class="num">${row.n.toLocaleString('en-US')}</td></tr>`).join('')}</table>
 
   <h2>每日请求（近 7 天）</h2>
   <div class="trends">
@@ -560,8 +560,8 @@ export function renderHealthPage(metrics: Metrics, options: { generatedAt: Date 
     <caption class="sr-only">近 7 天启动的版本与平台分布</caption>
     <tr><th scope="col">版本 · 平台</th><th scope="col">启动次数</th></tr>
     ${metrics.versions.length === 0
-      ? '<tr><th scope="row">版本分布</th><td>暂无数据</td></tr>'
-      : metrics.versions.map((row) => `<tr><th scope="row">${escapeHtml(row.version)} · ${escapeHtml(row.platform)}</th><td>${row.n}</td></tr>`).join('')}</table>
+      ? '<tr><th scope="row">版本分布</th><td class="num">暂无数据</td></tr>'
+      : metrics.versions.map((row) => `<tr><th scope="row">${escapeHtml(row.version)} · ${escapeHtml(row.platform)}</th><td class="num">${row.n}</td></tr>`).join('')}</table>
   <div class="stats">
     ${metrics.platforms.map((row) => stat(row.platform, `${row.n} · ${percent(row.n, platformTotal)}`)).join('')}
   </div>

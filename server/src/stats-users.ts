@@ -266,6 +266,14 @@ function percentile(sorted: number[], fraction: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
 }
 
+/** Short labels for a table cell; the long ones would crowd eight columns. */
+function categoryShort(category: string): string {
+  const labels: Record<string, string> = {
+    coding: 'Coding', data: 'Data', system: 'System', files: 'Files', writing: 'Writing', research: 'Research', other: 'Other',
+  }
+  return labels[category] ?? category
+}
+
 function categoryLabel(category: string): string {
   const labels: Record<string, string> = {
     coding: 'Coding / Debugging',
@@ -301,12 +309,12 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
     ${tableCaption('按首次调用成功日分组的留存')}
     <tr><th scope="col">首次使用</th><th scope="col">新增</th><th scope="col">D1</th><th scope="col">D3</th><th scope="col">D7</th></tr>
     ${metrics.cohorts.filter((row) => row.size > 0).length === 0
-      ? '<tr><th scope="row">近两周没有新的首次成功调用</th><td>—</td><td>—</td><td>—</td><td>—</td></tr>'
+      ? '<tr><th scope="row">近两周没有新的首次成功调用</th><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>'
       : metrics.cohorts
           .filter((row) => row.size > 0)
           .map((row) => `<tr><th scope="row">${escapeHtml(row.day)}${row.size < 5 ? ' · 样本小' : ''}</th>` +
-            `<td>${row.size}</td><td>${retention(row.d1, row.size)}</td>` +
-            `<td>${retention(row.d3, row.size)}</td><td>${retention(row.d7, row.size)}</td></tr>`)
+            `<td class="num">${row.size}</td><td class="num">${retention(row.d1, row.size)}</td>` +
+            `<td class="num">${retention(row.d3, row.size)}</td><td class="num">${retention(row.d7, row.size)}</td></tr>`)
           .join('')}
   </table>
   <p class="note">只统计首次成功调用落在该日、且有会话活动的账号；尚未到期的 D1/D3/D7 显示为 —。</p>
@@ -327,12 +335,12 @@ export function renderUsersPage(metrics: UserMetrics, options: { generatedAt: Da
     ? '<p class="note">暂无达到阈值的账号。</p>'
     : `<table>
     ${tableCaption('按真实成本排序的重度账号')}
-    <tr><th scope="col">用户</th><th scope="col">活跃天数</th><th scope="col">Session</th><th scope="col">请求</th><th scope="col">真实成本</th><th scope="col">主线任务</th><th scope="col">Wallet</th><th scope="col">付费</th><th scope="col">最近活跃</th></tr>
+    <tr><th scope="col">用户</th><th scope="col">活跃天数</th><th scope="col">Session</th><th scope="col">真实成本</th><th scope="col">主线任务</th><th scope="col">Wallet</th><th scope="col">付费</th><th scope="col">最近活跃</th></tr>
     ${metrics.heavy
       .map((user) => `<tr><th scope="row">${escapeHtml(user.displayName)}</th>` +
-        `<td>${user.activeDays}</td><td>${user.sessions}</td><td>${user.requests}</td>` +
-        `<td>${money(user.actualMicro)}</td><td>${escapeHtml(categoryLabel(user.category))}</td>` +
-        `<td>${money(user.walletMicro)}</td><td>${user.paid ? '是' : '否'}</td>` +
+        `<td class="num">${user.activeDays}</td><td class="num">${user.sessions}</td>` +
+        `<td class="num">${money(user.actualMicro)}</td><td>${escapeHtml(categoryShort(user.category))}</td>` +
+        `<td class="num">${money(user.walletMicro)}</td><td>${user.paid ? '是' : '否'}</td>` +
         `<td>${escapeHtml(lastActiveLabel(user.lastActive))}</td></tr>`)
       .join('')}
   </table>`}
