@@ -678,15 +678,9 @@ async function handlePayment(
       sendJson(response, created.status, { error: created.error, ...(created.message === undefined ? {} : { message: created.message }) })
       return
     }
-    sendJson(response, 200, {
-      orderId: created.order.orderId,
-      status: created.order.status,
-      channel: created.order.provider,
-      amountMicro: created.order.amountMicro,
-      amountFen: created.order.amountFen,
-      qrSvg: created.qrSvg,
-      expiresAt: created.order.expiresAt,
-    })
+    // The same shape the two read endpoints return, plus the QR code: one order
+    // contract, so a client parses a new order exactly like an existing one.
+    sendJson(response, 200, { ...publicOrder(created.order), qrSvg: created.qrSvg })
     return
   }
 

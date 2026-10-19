@@ -107,12 +107,22 @@ test('the config tells a client what it may buy, and hides the entry until live'
 test('an order carries a server-rendered QR code and no money yet', async () => {
   const response = await createOrder({ tier: 't30', channel: 'alipay' })
   assert.equal(response.status, 200)
-  const body = (await response.json()) as { orderId: string; status: string; amountMicro: number; qrSvg: string; expiresAt: string }
+  const body = (await response.json()) as {
+    orderId: string; status: string; amountMicro: number; createdAt: string; expiresAt: string
+    paidAt: string | null; channel: string; qrSvg: string
+  }
   assert.match(body.orderId, /^MR\d{14}[A-Z0-9]{6}$/)
   assert.equal(body.status, 'pending')
   assert.equal(body.amountMicro, 30_000_000)
   assert.ok(body.qrSvg.includes('<svg'), '客户端不需要自带二维码库')
   assert.ok(Date.parse(body.expiresAt) > Date.now())
+  // A freshly created order must be readable by the same parser as a fetched one:
+  // the client requires these fields, and a missing `createdAt` is what made the
+  // recharge panel say "无法识别".
+  assert.equal(body.channel, 'alipay')
+  assert.equal(typeof body.createdAt, 'string')
+  assert.equal(body.paidAt, null)
+  assert.ok(Date.parse(body.createdAt) <= Date.now())
   assert.equal(walletBalanceMicro(db, accountId), 0, '下单不入账')
 
   // A client cannot ask for an amount, only for a tier.
