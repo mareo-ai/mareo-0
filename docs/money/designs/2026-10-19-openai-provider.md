@@ -27,11 +27,17 @@
 
 **新增两件事**：
 
-1. **美元 → 人民币**：OpenAI 官方价是 USD/1M tokens。表里存 USD，运行时乘**固定汇率**（写死在 `pricing.ts`，按季度复核，见 §6.3）。用固定汇率是为了用户报价稳定：不能今天充 10 元、明天同一个请求贵 3%。
+1. **美元 → 人民币**：OpenAI 官方价是 USD/1M tokens。表里存 USD，运行时乘**汇率**：
+   - 汇率**可配置**（`PRICING_FX_RATE` 环境变量，默认 **7.0**），改汇率不需要发版
+   - **只影响之后的请求**：`usage.actualMicro` 在请求结束时算好并落库，换汇率**不回算历史**
+   - 每行 `usage` 记录 `priceVersion`（如 `2026-10-19#fx7.0`），任何一笔都能追溯到用了哪张价目表、哪个汇率
+   - 以后改成每日自动更新（取中间价）时，只需替换这个值的来源，计价逻辑不变
 2. **缓存计价三档不同**（与 DeepSeek 对齐但数值不同）：
    - OpenAI：`cached input` 约为 `input` 的 **10%**（具体以官方价目为准）
    - Anthropic（后续）：`cache read` 0.1×、`cache write` 1.25×
    - 因此 `usage` 需要区分 **cacheWrite**（见 §4）
+
+**长上下文档位**：这批模型对**超过 272K input tokens** 的请求，整单按 **2× input、1.5× output** 计价。必须在价目表里表达成可测的规则，否则一次大上下文请求就会亏。
 
 **边界（必须测试）**：
 - `cacheWrite + cacheMiss + cacheHit = inputTokens` 恒等；任一列缺失按 0 计并告警
@@ -77,13 +83,15 @@ ALTER TABLE usage ADD COLUMN cacheWriteTokens INTEGER; -- Anthropic 用；OpenAI
 
 ### 4.2 usage 归一化
 
+Responses API 与 Chat Completions 的字段名不同，网关按上游类型取对应字段（下表以 Responses 为准，括号内为 Chat Completions 等价字段）：
+
 | 我们的列 | OpenAI 字段 |
 |---|---|
-| inputTokens | `usage.prompt_tokens` |
-| cacheHitTokens | `usage.prompt_tokens_details.cached_tokens` |
-| cacheMissTokens | `prompt_tokens − cached_tokens` |
-| outputTokens | `usage.completion_tokens` |
-| reasoningTokens | `usage.completion_tokens_details.reasoning_tokens` |
+| inputTokens | `usage.input_tokens`（Chat: `usage.prompt_tokens`） |
+| cacheHitTokens | `usage.input_tokens_details.cached_tokens`（Chat: `prompt_tokens_details.cached_tokens`） |
+| cacheMissTokens | `input_tokens − cached_tokens` |
+| outputTokens | `usage.output_tokens`（Chat: `completion_tokens`） |
+| reasoningTokens | `usage.output_tokens_details.reasoning_tokens`（Chat: `completion_tokens_details.reasoning_tokens`） |
 | cacheWriteTokens | 0（OpenAI 无此概念） |
 
 取不到 usage 的流（被中断）→ 记 `status` 且 `usageSource = null`，**不计费**，报表计入"缺 usage"（沿用现有口径）。
@@ -92,7 +100,13 @@ ALTER TABLE usage ADD COLUMN cacheWriteTokens INTEGER; -- Anthropic 用；OpenAI
 
 ### 5.1 网关新增路由
 
-- `POST /openai/v1/chat/completions` → OpenAI Chat Completions 上游（新增）
+> **关键约束**（第三方镜像的模型说明，实现前必须用一个真实请求验证）：gpt-6 系列在
+> **Chat Completions 上只在关闭 reasoning 时支持 function calling**；开启 reasoning 时的
+> 内置工具与函数调用**要求走 Responses API**。而 DSH 是重度使用工具调用的编程 agent，
+> 因此**首批路由应走 `openai-responses`**，而不是 Chat Completions。这也决定了下面的路径与 usage 字段。
+
+- `POST /openai/v1/responses` → OpenAI Responses API 上游（新增，**首选**）
+- `POST /openai/v1/chat/completions` → 仅用于关闭 reasoning 的简单调用（可后置）
 - `POST /anthropic/v1/messages` → 现有路径；**改为按 model 选上游**（DeepSeek / 未来的 Claude）
 
 ### 5.2 上游配置（一次改，两种上游都支持）
@@ -118,14 +132,27 @@ OPENAI_BASE_URL=              # 可选；留空用 https://api.openai.com/v1
 
 ### 5.4 首批模型（待你确认）
 
-| 模型 | 用途 | 官方价（USD / 1M tokens） | 状态 |
-|---|---|---|---|
-| `gpt-5` | 主力 | input __ · cached __ · output __ | **待填** |
-| `gpt-5-mini` | 便宜档 | input __ · cached __ · output __ | **待填（可选）** |
+当前 GPT-6 系列（USD / 1M tokens，来源：第三方镜像 `vxcontrol/pentagi` 的 `models.yml`，**需在 OpenAI 后台核对后再落库**）：
 
-单价必须来自 OpenAI 控制台的 pricing 页面（本环境访问被 403 拦，无法代查），抄录后同时写进本表与 `pricing.ts`，并在报表页脚标注价目表版本。
+| 模型 | 定位 | input | cached | output | 首批 |
+|---|---|---|---|---|---|
+| `gpt-6-sol` | **复杂编程与 agentic 工作流** | 2.0 | 0.2 | 10.0 | ✅ 主力 |
+| `gpt-6-luna` | 高并发、轻任务 | 0.1 | 0.01 | 0.5 | ✅ 便宜档 |
+| `gpt-6-astra` | 最强，端到端推理/文档 | 10.0 | 1.0 | 50.0 | 暂不上（output 是 sol 的 5×） |
+
+对比参照：`deepseek-flash` 输出 ¥4/1M（≈$0.55），`gpt-6-sol` 输出 $10/1M，**约 18 倍**；`gpt-6-luna` 与 flash 同量级。所以**选 sol 跑 agentic 循环会明显更贵**，这是产品定价与用户预期要面对的事实。
 
 ## 6. 客户端影响
+
+**展示名**：产品里**不出现 OpenAI / ChatGPT**（商标与地域可用性都不适合直接写）。模型以能力档位命名，厂商与具体型号只写在文档和报表里：
+
+| 展示名 | 实际模型 | 定位一句话 |
+|---|---|---|
+| `Mareo Prime` | `gpt-6-sol` | 复杂编程与多步任务 |
+| `Mareo Lite` | `gpt-6-luna` | 轻量、快速、便宜 |
+
+这样换上游（Azure → 其他）也不用改名；且**不宣称自研**，设置里注明"由第三方模型服务商提供"。
+
 
 - 模型目录由我们的 patch（`src/dsh-runtime.ts`）注入，因此**需要一次客户端发版**才能在选择器里看到 `gpt-5`
 - 供应商设置页保持关闭（不开放 BYOK），三条路由全部由我们声明
