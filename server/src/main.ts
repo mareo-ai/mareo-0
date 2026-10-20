@@ -9,6 +9,17 @@ function envNumber(name: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback
 }
 
+/** A proxy URL is worth logging without its password. */
+function maskProxy(proxyUrl: string): string {
+  try {
+    const parsed = new URL(proxyUrl)
+    if (parsed.password !== '') parsed.password = '***'
+    return parsed.toString()
+  } catch {
+    return '(无法解析的代理地址)'
+  }
+}
+
 const port = envNumber('PORT', 3000)
 const host = process.env.HOST ?? '127.0.0.1'
 const dbPath = process.env.DB_PATH ?? 'data/mareo.db'
@@ -35,6 +46,11 @@ const openaiUpstream = openaiKey === ''
       upstreamBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
       apiKey: openaiKey,
       stripPrefix: '/openai',
+      // Some networks cannot reach the vendor directly; an egress proxy keeps the
+      // domestic upstream direct and only detours this one.
+      ...(process.env.OPENAI_PROXY_URL === undefined || process.env.OPENAI_PROXY_URL === ''
+        ? {}
+        : { proxyUrl: process.env.OPENAI_PROXY_URL }),
     }
 
 const server = createGatewayServer({ db, upstreamBaseUrl, apiKey, dailyLimit, dailyWarnLimit,
@@ -62,7 +78,8 @@ server.listen(port, host, () => {
   console.log(`Proxying to ${upstreamBaseUrl} with daily limit ${dailyLimit} requests per user (warn at ${dailyWarnLimit})`)
   console.log(openaiUpstream === undefined
     ? 'OpenAI upstream: not configured (OPENAI_API_KEY is empty)'
-    : `OpenAI upstream: ${openaiUpstream.upstreamBaseUrl} at /openai/`)
+    : `OpenAI upstream: ${openaiUpstream.upstreamBaseUrl} at /openai/` +
+      (openaiUpstream.proxyUrl === undefined ? '' : `, via ${maskProxy(openaiUpstream.proxyUrl)}`))
   console.log(`Recharge: mode=${payments.mode}, 用户可见=${paymentsEnabled(payments)}`)
 })
 

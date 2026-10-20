@@ -178,3 +178,19 @@ ALIPAY_PUBLIC_KEY_PATH=secrets/alipay_public.pem
 chown -R 1000:1000 secrets && chmod 700 secrets && chmod 600 secrets/*.pem
 ```
 
+## 境外出口（OpenAI 上游）
+
+阿里云杭州的这台机器**连不上 `api.openai.com`**（DNS 被投毒 + TCP 不通），
+DeepSeek 与 Anthropic 是可达的。因此 OpenAI 的请求要经一台境外主机转发：
+
+1. 在一台境外主机（新加坡 / 日本优先，香港需先确认 OpenAI 支持该地区）上运行
+   `deploy/egress-proxy/setup.sh`：装 Squid、只允许本机 IP + 用户名密码、打印出 `OPENAI_PROXY_URL` 那一行。
+2. 把那一行写进 `.env`，`docker compose up -d gateway` 重启。
+3. 启动日志应出现 `OpenAI upstream: https://api.openai.com/v1 at /openai/, via http://mareo:***@…`（密码已打码）。
+
+**行为与边界**
+
+- 代理**只作用于 OpenAI 上游**；DeepSeek 仍然直连，不跨境（这是这条路线的全部意义）。
+- 代理挂掉时客户端收到 **502**，usage 记为失败、`actualMicro` 为 NULL——**不计费也不回退直连**（直连本来就不通，静默回退只会掩盖故障）。
+- 凭据只存在服务器 `.env`（root 600），不进客户端、不进日志、不进报表。
+- 出口是单点：VPS 挂了就只有 OpenAI 模型不可用，用户可以切回 Lite（DeepSeek）继续工作。

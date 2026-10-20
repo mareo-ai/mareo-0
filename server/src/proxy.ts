@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
+import { ProxyAgent } from 'undici'
 import type { TokenUsage } from './pricing.js'
 import type { RequestKind } from './usage.js'
 
@@ -13,6 +14,12 @@ export interface ProxyConfig {
   auth?: 'bearer'
   /** Strips this path prefix before appending to the upstream base. */
   stripPrefix?: string
+  /**
+   * An HTTP CONNECT proxy to reach the upstream through, for an upstream that is
+   * not reachable from this network directly. Node's fetch ignores the usual
+   * proxy environment variables, so the agent has to be passed explicitly.
+   */
+  proxyUrl?: string
   /**
    * Rejects a request before it is forwarded when the model cannot be priced.
    * Absent on the default upstream, where every model is priced by one table.
@@ -351,6 +358,9 @@ export async function proxyRequest(
     if (value !== undefined) forwardedHeaders[header] = String(value)
   }
 
+  // A dispatcher is only built when a proxy is configured, so the direct path
+  // keeps exactly the behaviour it had before.
+  const dispatcher = config.proxyUrl === undefined ? undefined : new ProxyAgent(config.proxyUrl)
   let upstream: Response
   try {
     upstream = await fetch(upstreamUrl, {
@@ -358,6 +368,8 @@ export async function proxyRequest(
       headers: forwardedHeaders,
       body: body.length > 0 ? new Uint8Array(body) : undefined,
       redirect: 'manual',
+      // `dispatcher` is undici's own option; the DOM types do not know it.
+      ...(dispatcher === undefined ? {} : { dispatcher } as RequestInit),
     })
   } catch (error) {
     sendUpstreamError(response, `upstream unreachable: ${messageFrom(error)}`)
