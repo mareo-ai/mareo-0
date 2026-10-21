@@ -35,14 +35,35 @@ export function isValidVersion(version) {
   return VERSION_PATTERN.test(version)
 }
 
-/** Numeric comparison is enough here: the inputs are validated x.y.z strings. */
+/** A pinned version is x.y.z, optionally with a prerelease suffix (`0.2.1-rc.2`). */
+function versionParts(version) {
+  const [core, prerelease = ''] = version.replace(/^v/, '').split('-', 2)
+  return { numbers: core.split('.').map((part) => Number.parseInt(part, 10) || 0), prerelease }
+}
+
+/** Numeric ordering; a release outranks its own prereleases. */
 export function isNewerVersion(candidate, current) {
-  const a = candidate.split('.').map(Number)
-  const b = current.split('.').map(Number)
+  const a = versionParts(candidate)
+  const b = versionParts(current)
   for (let index = 0; index < 3; index += 1) {
-    if (a[index] !== b[index]) return a[index] > b[index]
+    if (a.numbers[index] !== b.numbers[index]) return a.numbers[index] > b.numbers[index]
   }
-  return false
+  if (a.prerelease === b.prerelease) return false
+  if (a.prerelease === '') return true
+  if (b.prerelease === '') return false
+  return a.prerelease > b.prerelease
+}
+
+/**
+ * Refuses a release whose bundled DSH is older than the previous release's: a
+ * session written by a newer runtime cannot be read by an older one, so this
+ * regression would break every session its predecessor wrote — including those
+ * of anyone who installs the release and later goes back.
+ */
+export function dshPinRefusal(previousPin, nextPin) {
+  if (previousPin === undefined || nextPin === undefined) return undefined
+  if (!isNewerVersion(previousPin, nextPin)) return undefined
+  return `内置 DSH 从 ${previousPin} 回退到 ${nextPin}：更新运行时写下的会话在旧运行时里打不开`
 }
 
 /** Arguments for `git tag -a`, so the release metadata travels with the tag. */
@@ -74,6 +95,7 @@ export function parseArguments(argv) {
     minimumVersion: value('--minimum-version'),
     dryRun: argv.includes('--dry-run'),
     yes: argv.includes('--yes'),
+    allowDshDowngrade: argv.includes('--allow-dsh-downgrade'),
   }
 }
 
@@ -104,6 +126,21 @@ async function ensureTagAvailable(version) {
   if ((await git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`)) !== '') {
     throw new Error(`远端已有 tag ${tag}，该版本已经发布过`)
   }
+}
+
+/** The DSH pin a committed ref shipped, so a release can be checked against its predecessor. */
+async function dshPinAt(ref) {
+  try {
+    const manifest = JSON.parse(await git('show', `${ref}:runtime/package.json`))
+    return manifest.dependencies?.['@deepseek-ai/dsh']
+  } catch {
+    return undefined
+  }
+}
+
+async function workingDshPin() {
+  const manifest = JSON.parse(await readFile(path.join(projectRoot, 'runtime/package.json'), 'utf8'))
+  return manifest.dependencies?.['@deepseek-ai/dsh']
 }
 
 async function main() {
@@ -137,6 +174,14 @@ async function main() {
   }
   await ensureTagAvailable(version)
 
+  const previousTag = await git('describe', '--tags', '--abbrev=0').catch(() => undefined)
+  const previousPin = previousTag === undefined ? undefined : await dshPinAt(previousTag)
+  const nextPin = await workingDshPin()
+  const pinRefusal = dshPinRefusal(previousPin, nextPin)
+  if (pinRefusal !== undefined && !options.allowDshDowngrade) {
+    throw new Error(`${pinRefusal}。确认要回退就加 --allow-dsh-downgrade`)
+  }
+
   console.log('\n将要执行：')
   console.log(`  1. package.json 版本 ${currentVersion} -> ${version}`)
   console.log(`  2. 提交 "Release ${version}" 并推送到 main`)
@@ -147,6 +192,8 @@ async function main() {
       : `     minimumVersion ${minimumVersion} —— 低于该版本的客户端将无法使用，必须更新`,
   )
   console.log('  4. 推送 tag，CI 构建 macOS/Windows 安装包并发布到 OSS 与官网')
+  console.log(`     内置 DSH：${previousPin ?? '（无上一版）'} -> ${nextPin ?? '（未知）'}`)
+  if (pinRefusal !== undefined) console.log(`     ⚠️ ${pinRefusal}（已按 --allow-dsh-downgrade 放行）`)
 
   if (options.dryRun) {
     console.log('\n[dry-run] 到此为止，没有做任何改动。')

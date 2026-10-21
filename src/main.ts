@@ -15,7 +15,8 @@ import {
 import { prepareAccountHome } from './account-home.js'
 import { applyDefaultModel } from './model-default.js'
 import { applyModelCatalog } from './model-catalog.js'
-import { startDshRuntime, type DshRuntime } from './dsh-runtime.js'
+import { readDshVersion, startDshRuntime, type DshRuntime } from './dsh-runtime.js'
+import { isHarnessDowngrade, rememberHarness, type HarnessStamp } from './harness-stamp.js'
 import { squirrelActionFor, type SquirrelAction } from './squirrel.js'
 import {
   fetchLatestRelease,
@@ -153,6 +154,11 @@ function dshBasePath(): string {
   return path.join(app.getPath('userData'), 'dsh')
 }
 
+/** The bundled runtimes: the app's resources, or the staged copy in development. */
+function runtimeDirectoryPath(): string {
+  return app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), '.staging')
+}
+
 /**
  * A first successful launch is what tells us an install actually worked. It is
  * reported once per installation, and the marker is only written when the report
@@ -180,6 +186,14 @@ async function startMareo(): Promise<void> {
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
   if (!(await passesMinimumVersion())) {
     recordEvent({ name: 'launch', detail: { ok: false, stage: 'update-required' } })
+    await telemetry.flush()
+    app.quit()
+    return
+  }
+  // Local state, so it runs after the remote gate and before anything reads a
+  // session: being told why a session will not open beats finding out per session.
+  if (!(await passesRuntimeDowngradeCheck())) {
+    recordEvent({ name: 'launch', detail: { ok: false, stage: 'runtime-downgrade' } })
     await telemetry.flush()
     app.quit()
     return
@@ -248,9 +262,7 @@ async function startMareo(): Promise<void> {
     // The engine's own output; when a start fails this is the file to ask for.
     const engineLog = path.join(app.getPath('userData'), 'logs', 'mareo.log')
     try {
-      const runtimeDirectory = app.isPackaged
-        ? process.resourcesPath
-        : path.join(app.getAppPath(), '.staging')
+      const runtimeDirectory = runtimeDirectoryPath()
       const dshHome = await prepareAccountHome(dshBasePath(), account.accountId)
       // Pin the model before the engine reads its settings: the catalog's legacy
       // default is declared text-only, and image reading depends on this.
@@ -480,6 +492,33 @@ async function passesMinimumVersion(): Promise<boolean> {
     if (response !== 0) return false
     await shell.openExternal(downloadUrl)
   }
+}
+
+/**
+ * A build that bundles an older DSH than one already used on this machine cannot
+ * open the sessions the newer one wrote: DSH refuses to interpret a log holding
+ * an event type it does not know, so no session-level repair is available here.
+ * Refusing the launch with the version to install is the only useful answer.
+ */
+async function passesRuntimeDowngradeCheck(): Promise<boolean> {
+  const dshVersion = await readDshVersion(path.join(runtimeDirectoryPath(), 'dsh-runtime'))
+  if (dshVersion === undefined) return true
+  const current: HarnessStamp = { appVersion: app.getVersion(), dshVersion }
+  const newest = await rememberHarness(app.getPath('userData'), current)
+  if (!isHarnessDowngrade(newest, current)) return true
+
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    title: '当前版本比上次运行的更旧',
+    message: `上次运行的是 Mareo ${newest.appVersion}（DSH ${newest.dshVersion}），当前是 ${app.getVersion()}（DSH ${dshVersion}）。`,
+    detail: `这个版本读不了更新运行时写下的会话事件，${newest.appVersion} 用过的会话会打不开。\n\n请安装 Mareo ${newest.appVersion} 或更新版本后再使用。`,
+    // A developer switching to an older branch should not be locked out of their
+    // own checkout; a shipped build that went backwards should not start.
+    buttons: app.isPackaged ? ['退出', '仍要打开'] : ['继续', '退出'],
+    defaultId: 0,
+    cancelId: 1,
+  })
+  return app.isPackaged ? response === 1 : response === 0
 }
 
 /** Local calendar day, so a reminder is not repeated after a quick restart. */

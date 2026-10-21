@@ -56,6 +56,22 @@ interface DshPackageJson {
   }
 }
 
+/** Where the staged DSH package sits inside a runtime directory. */
+function dshPackageDirectory(runtimeDirectory: string): string {
+  return path.join(runtimeDirectory, 'node_modules', '@deepseek-ai', 'dsh')
+}
+
+/** The DSH version staged under `runtimeDirectory`, or undefined when absent. */
+export async function readDshVersion(runtimeDirectory: string): Promise<string | undefined> {
+  try {
+    const manifestPath = path.join(dshPackageDirectory(runtimeDirectory), 'package.json')
+    const raw = JSON.parse(await readFile(manifestPath, 'utf8')) as { version?: unknown }
+    return typeof raw.version === 'string' ? raw.version : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function extractDshUrl(output: string): string | undefined {
   const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/\?token=[^\s]+/)
   if (!match) return undefined
@@ -68,9 +84,9 @@ export function extractDshUrl(output: string): string | undefined {
 }
 
 export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<DshRuntime> {
-  const dshPackageDirectory = path.join(options.runtimeDirectory, 'node_modules', '@deepseek-ai', 'dsh')
+  const packageDirectory = dshPackageDirectory(options.runtimeDirectory)
   const packageJson = JSON.parse(
-    await readFile(path.join(dshPackageDirectory, 'package.json'), 'utf8'),
+    await readFile(path.join(packageDirectory, 'package.json'), 'utf8'),
   ) as DshPackageJson
 
   if (!packageJson.bin?.dsh) {
@@ -111,7 +127,7 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
   await mkdir(path.dirname(options.logFile), { recursive: true })
 
   const launch: DshLaunch = {
-    dshBinPath: path.join(dshPackageDirectory, packageJson.bin.dsh),
+    dshBinPath: path.join(packageDirectory, packageJson.bin.dsh),
     brandPatch,
     startupTimeoutMs: options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS,
     log: createWriteStream(options.logFile, { flags: 'w' }),

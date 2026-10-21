@@ -15,7 +15,7 @@ Mareo 是 **DeepSeek Harness（DSH）的桌面薄壳**：DSH 始终是第三方�
 | `src/` | Electron 主进程（TypeScript） | `main.ts`（启动编排、窗口、登录）、`dsh-runtime.ts`（起/停 DSH 进程）、`account.ts`（账号与网关地址）、`telemetry.ts`（事件上报）、`quota.ts`（额度条）、`model-default.ts`（默认模型迁移） |
 | `brand/` | 注入 DSH 的品牌插件（宿主半 + 客户端半） | `client.cjs`（侧边栏额度条 `sidebar.footer.action`、赞助位） |
 | `assets/` | 启动页 / 登录页 / preload | `startup.html`、`signin.html`、`account-bridge-preload.js` |
-| `runtime/` | DSH 运行时依赖**钉版** | `package.json`（`@deepseek-ai/dsh: 0.1.5-rc.2`）、`package-lock.json` |
+| `runtime/` | DSH 运行时依赖**钉版** | `package.json`（`@deepseek-ai/dsh: 0.2.1-rc.2`）、`package-lock.json` |
 | `server/` | 自建网关：零框架 Node + TS + `node:sqlite` | `src/server.ts`（路由）、`proxy.ts`（转发 + 用量解析）、`quota.ts`（免费额度 + 钱包两桶）、`wallet.ts`（唯一入账/扣减入口，见 `docs/money/standard.md`）、`rewards.ts`（奖励任务）、`pricing.ts`（唯一算钱入口）、`cost-report.ts`（含「钱包与毛利」分节）、`settings.ts`、`db.ts`（schema） |
 | `website/` | 官网（纯静态） | `index.html`、`app.js`、`privacy*.html` |
 | `docs/` | 运维/发布/合规文档 | `operations.md`（最常查）、`release.md`、`signing.md`、`metrics.md`、`updates.md`、`privacy.md`、`dsh-upgrade.md`（DSH 升级评估与计划） |
@@ -96,6 +96,8 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 
 ## 5. 当前状态快照（截至 2026-10-09）
 
+> 快照之后的变化：main 已 tag **v0.2.2**（内置 DSH 0.2.1-rc.2），本机安装面仍是 0.2.1（DSH 0.2.0-rc.2）。下表除「运行时钉版」一行外尚未按 0.2.2 重新核对。
+
 | 项 | 值 |
 |---|---|
 | 已发布版本 | **0.1.9**（2026-10-13 上线，含 Windows 启动修复与安装包签名） |
@@ -103,7 +105,7 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 | 线上额度配置 | `quota.mode=enforce`、默认 **¥10/天**；`quota.accountAllowances` 已随 v9 迁移删除（`1305d9ac`、`f9086e44` 都回到 ¥10/天）。要给某账号放宽额度就给它入账 Wallet（`credit-cli`） |
 | 线上请求闸门 | `DAILY_LIMIT=0`（已关闭请求次数上限）、`DAILY_WARN_LIMIT=500` |
 | 数据库 | 线上 schema **9**（45 个账号，约 6.7 万行 usage）；迁移前的备份 `deploy/backups/mareo-20261013-020427.db`，旧代码 `deploy/src.bak-20261013-020426` |
-| 运行时钉版 | `@deepseek-ai/dsh 0.2.0-rc.2`（在分支 `feat/dsh-0.2.0` / PR #5，**未合并、未发版**；线上 0.1.9 里带的仍是 `0.1.5-rc.2`）。前提、改动与全部验证见 `docs/dsh-upgrade.md` |
+| 运行时钉版 | `@deepseek-ai/dsh 0.2.1-rc.2`（已随 **v0.2.2** 发版；快照当时的 0.2.0-rc.2 已被取代）。升级路线与验证见 `docs/dsh-upgrade.md`，降级风险见 `docs/session-log-downgrade.md` |
 
 ### 已知问题（按影响排序）
 
@@ -112,11 +114,12 @@ $SSH "cd /srv/mareo/server/deploy && docker compose exec -T gateway node -" < /t
 3. **Windows 签名覆盖有限**：**0.1.9 起 `Mareo.exe` 与 `MareoSetup.exe` 已签名**（锐安信云签名，2 次/构建，额度 1000 次/年）；Electron DLL 与 DSH 原生模块仍未签（不影响安装，`pty.node` 曾报 `UnknownError`）。SmartScreen 信誉仍需时间积累。
 4. **免费额度卡住最活跃用户**：¥10/天硬顶被重度用户反复撞到（单日上百次 429），是最黏用户的主要摩擦点。Credit Wallet 就是为此准备的下一步（钱包可入账、可透支最后一笔）。
 5. **更新推不动**：仍有用户停留在 0.1.4（不带 session 头）。
+6. **会话日志只增不减**：会话事件词汇随 DSH 只增不减，读日志是 fail-closed（不认识且没标 `ignorable` 就整份拒读）。因此用 dev 构建写过的会话，旧发行版打不开；用户回滚装旧版也会打不开最近写过的会话。已有启动降级守卫 + 发版禁止 DSH 钉版回退 + 恢复工具，见 `docs/session-log-downgrade.md`。
 
 ### 进行中的事
 
 - **Credit Wallet 上线**：服务端已在 2026-10-13 02:05 上线（v9、`enforce`，见状态快照）；**客户端两行额度条还没发版**。设计文档见 `docs/money/designs/2026-10-12-credit-wallet.md`。
-- **DSH 升级（0.1.5-rc.2 → 0.2.0-rc.2）**：一个 PR（#5，分支 `feat/dsh-0.2.0`）= 网关 + 客户端 + 方案文档。**网关部分已上线**（接受 `x-api-key`、按内容判别搜索、Messages 形态的标题解析）；客户端待发版，发版前还差 Windows 真机烟测。前提、改动与验证见 [`docs/dsh-upgrade.md`](dsh-upgrade.md)。
+- **DSH 升级**：0.1.5-rc.2 → 0.2.0-rc.2 之后，main 上的钉版又走到 **0.2.1-rc.2**，随 **v0.2.2** 发版。网关侧（`x-api-key`、按内容判别搜索、Messages 形态的标题解析）已在线上；升级前提与验证见 [`docs/dsh-upgrade.md`](dsh-upgrade.md)。**降级 / 回滚会让新会话打不开**，见 [`docs/session-log-downgrade.md`](session-log-downgrade.md)。
 - **充值（微信/支付宝）**：设计文档在 PR #4（分支 `docs/recharge-design`），待评审；商户号与支付宝企业应用还在申请，代码可先用模拟 provider 跑通。
 - 下一步产品方向已定：**当前阶段优先拉新**（高于收钱），"可承受的成本结构"是拉新前提；Wallet 之后是**邀请送额度**（`grantCredit` 已就位，只差入口）。
 

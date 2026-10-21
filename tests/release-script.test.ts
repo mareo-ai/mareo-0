@@ -10,6 +10,7 @@ interface ReleaseScriptModule {
   suggestNote: (subjects: string[]) => string
   tagArguments: (version: string, options: { notes: string; minimumVersion: string }) => string[]
   parseArguments: (argv: string[]) => Record<string, unknown>
+  dshPinRefusal: (previousPin: string | undefined, nextPin: string | undefined) => string | undefined
 }
 
 async function releaseScript(): Promise<ReleaseScriptModule> {
@@ -74,6 +75,7 @@ test('reads flags, defaulting to an interactive run', async () => {
     minimumVersion: undefined,
     dryRun: false,
     yes: false,
+    allowDshDowngrade: false,
   })
   assert.deepEqual(parseArguments(['--version', '0.1.3', '--notes', 'n', '--minimum-version', '', '--dry-run']), {
     version: '0.1.3',
@@ -81,5 +83,29 @@ test('reads flags, defaulting to an interactive run', async () => {
     minimumVersion: '',
     dryRun: true,
     yes: false,
+    allowDshDowngrade: false,
   })
+  assert.equal(parseArguments(['--allow-dsh-downgrade']).allowDshDowngrade, true)
+})
+
+test('orders pinned prerelease versions, so a DSH regression is visible', async () => {
+  const { isNewerVersion } = await releaseScript()
+  assert.equal(isNewerVersion('0.2.1-rc.2', '0.2.0-rc.2'), true)
+  assert.equal(isNewerVersion('0.2.0-rc.2', '0.2.1-rc.2'), false)
+  assert.equal(isNewerVersion('0.2.1', '0.2.1-rc.2'), true)
+  assert.equal(isNewerVersion('0.2.1-rc.2', '0.2.1'), false)
+  assert.equal(isNewerVersion('0.2.1-rc.2', '0.2.1-rc.2'), false)
+})
+
+test('refuses a release that would bundle an older DSH than the last one', async () => {
+  const { dshPinRefusal } = await releaseScript()
+  // Forward or unchanged pins are the normal case.
+  assert.equal(dshPinRefusal('0.2.0-rc.2', '0.2.1-rc.2'), undefined)
+  assert.equal(dshPinRefusal('0.2.1-rc.2', '0.2.1-rc.2'), undefined)
+  assert.equal(dshPinRefusal(undefined, '0.2.1-rc.2'), undefined)
+  assert.equal(dshPinRefusal('0.2.1-rc.2', undefined), undefined)
+
+  const refusal = dshPinRefusal('0.2.1-rc.2', '0.2.0-rc.2')
+  assert.ok(refusal !== undefined)
+  assert.match(refusal, /0\.2\.1-rc\.2 回退到 0\.2\.0-rc\.2/)
 })
