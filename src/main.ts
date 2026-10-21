@@ -14,6 +14,7 @@ import {
 } from './account.js'
 import { prepareAccountHome } from './account-home.js'
 import { applyDefaultModel } from './model-default.js'
+import { applyModelCatalog } from './model-catalog.js'
 import { startDshRuntime, type DshRuntime } from './dsh-runtime.js'
 import { squirrelActionFor, type SquirrelAction } from './squirrel.js'
 import {
@@ -254,6 +255,10 @@ async function startMareo(): Promise<void> {
       // Pin the model before the engine reads its settings: the catalog's legacy
       // default is declared text-only, and image reading depends on this.
       await applyDefaultModel(dshHome)
+      // The picker is our product surface: every model is named Mareo-<vendor
+      // initial>-<model>, and the OpenAI route is declared here rather than
+      // reachable from any settings page the user can open.
+      await applyModelCatalog(dshHome, GATEWAY_URL)
       dshRuntime = await startDshRuntime({
         runtimeDirectory: path.join(runtimeDirectory, 'dsh-runtime'),
         nodeExecutable: path.join(runtimeDirectory, 'node-runtime', 'bin', process.platform === 'win32' ? 'node.exe' : 'node'),
@@ -272,6 +277,9 @@ async function startMareo(): Promise<void> {
           // endpoint does not accept — and nothing would be metered. The
           // provider appends `/messages`, so the base ends at `/anthropic/v1`.
           DEEPSEEK_SEARCH_BASE_URL: `${GATEWAY_URL}/anthropic/v1`,
+          // The credential the OpenAI route presents to our own gateway; the
+          // vendor key lives only on the server.
+          MAREO_API_KEY: account.token,
         },
         onUnexpectedExit: (message, errorOutput) => showUnexpectedExit(message, errorOutput),
       })
