@@ -221,3 +221,65 @@ test('without an OpenAI key the path answers 503 instead of proxying', () => {
     })
   })
 })
+
+test('a Sol request is attributed to its session from the body, not the header', async () => {
+  // The Responses route puts the cache/session key in the body; the Messages
+  // route uses a header. Without reading the body every OpenAI row loses its
+  // session, and cost can only ever be reported per account.
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-openai-session-'))
+  const db: GatewayDatabase = openDatabase(path.join(directory, 'gateway.db'))
+  const accountId = createTokenAccount(db, '会话归因测试')
+  const token = 'session-attribution-token'
+  storeToken(db, { userId: accountId, label: 'test', tokenHash: hashToken(token) })
+  writeSetting(db, 'quota.mode', 'off')
+
+  const upstream: Server = createHttpServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      id: 'resp_1',
+      model: 'gpt-6-sol',
+      usage: { input_tokens: 1000, input_tokens_details: { cached_tokens: 900 }, output_tokens: 10 },
+    }))
+  })
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+  const upstreamPort = (upstream.address() as AddressInfo).port
+
+  const gateway = createGatewayServer({
+    db,
+    upstreamBaseUrl: 'http://127.0.0.1:1',
+    apiKey: 'unused',
+    openaiUpstream: {
+      upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+      apiKey: 'sk-test',
+      stripPrefix: '/openai',
+    },
+    dailyLimit: 0,
+  })
+  await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', resolve))
+  const port = (gateway.address() as AddressInfo).port
+
+  try {
+    // A body far larger than any header-based path would carry, with the key
+    // where the adapter puts it: the scan must not depend on a full parse.
+    const padding = 'x'.repeat(512 * 1024)
+    const response = await fetch(`http://127.0.0.1:${port}/openai/v1/responses`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-6-sol',
+        input: [{ role: 'user', content: padding }],
+        prompt_cache_key: 'session-afc9bae8',
+      }),
+    })
+    assert.equal(response.status, 200)
+    const row = db.prepare('SELECT sessionId FROM usage WHERE model = ? ORDER BY id DESC LIMIT 1').get('gpt-6-sol') as
+      | { sessionId: string | null }
+      | undefined
+    assert.equal(row?.sessionId, 'session-afc9bae8')
+  } finally {
+    await new Promise<void>((resolve) => gateway.close(() => resolve()))
+    await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    db.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

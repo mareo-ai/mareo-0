@@ -283,6 +283,23 @@ function readBody(request: IncomingMessage): Promise<Buffer> {
   })
 }
 
+/**
+ * The Responses route carries its session in the body (`prompt_cache_key`),
+ * while the Messages route uses a header. Reading it here is what makes a Sol
+ * request attributable: without it every OpenAI row records no session, and
+ * cost can only be reported per account.
+ *
+ * The body can be megabytes, so this looks for the key and decodes only the
+ * value beside it instead of parsing the whole document.
+ */
+function promptCacheKeyFromBody(body: Buffer): string | null {
+  const marker = body.indexOf('"prompt_cache_key"')
+  if (marker < 0) return null
+  const slice = body.subarray(marker, Math.min(body.length, marker + 256)).toString('utf8')
+  const match = /"prompt_cache_key"\s*:\s*"([A-Za-z0-9_-]{8,128})"/.exec(slice)
+  return match === null ? null : match[1]
+}
+
 function modelFromBody(body: Buffer): string | null {
   if (body.length === 0) return null
   try {
@@ -317,7 +334,8 @@ export async function proxyRequest(
   const body = await readBody(request)
   const model = modelFromBody(body)
   const sessionHeader = request.headers['x-deepseek-harness-session-id']
-  const sessionId = typeof sessionHeader === 'string' && sessionHeader !== '' ? sessionHeader : null
+  const sessionId =
+    typeof sessionHeader === 'string' && sessionHeader !== '' ? sessionHeader : promptCacheKeyFromBody(body)
   // Search has its own price profile, so it gets its own kind rather than hiding
   // in `chat` — and the request body, not the path, is what says which it is.
   const requestKind: RequestKind = isSearchRequest(body) ? 'search' : isTitleRequest(body) ? 'title' : 'chat'
