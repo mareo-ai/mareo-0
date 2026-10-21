@@ -91,6 +91,11 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
     { id: 'ui-settings-account', disabled: true },
     { id: 'llm-deepseek-account', disabled: true },
     { id: 'deepseek-account', disabled: true },
+    // 0.2.1 added a Search/Fetch client that talks to DeepSeek's API directly with
+    // `DEEPSEEK_API_KEY` — which here is the account's gateway token, and which
+    // would skip the gateway entirely, so its calls would neither authenticate
+    // nor be metered. Search still works through the Messages path we proxy.
+    { id: 'web-deepseek-api', disabled: true },
     // The plugin manager and the web-search settings page stay available: users
     // may switch on the official bundles they want (voice input among them) and
     // point search at their own credentials — search on the user's own key costs
