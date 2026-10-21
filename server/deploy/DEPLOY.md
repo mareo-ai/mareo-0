@@ -180,13 +180,45 @@ chown -R 1000:1000 secrets && chmod 700 secrets && chmod 600 secrets/*.pem
 
 ## 境外出口（OpenAI 上游）
 
-阿里云杭州的这台机器**连不上 `api.openai.com`**（DNS 被投毒 + TCP 不通），
-DeepSeek 与 Anthropic 是可达的。因此 OpenAI 的请求要经一台境外主机转发：
+阿里云杭州的这台机器**连不上 `api.openai.com`**（DNS 被投毒 + TCP 不通）；DeepSeek 可达，
+Anthropic 也可达。
 
-1. 在一台境外主机（新加坡 / 日本优先，香港需先确认 OpenAI 支持该地区）上运行
-   `deploy/egress-proxy/setup.sh`：装 Squid、只允许本机 IP + 用户名密码、打印出 `OPENAI_PROXY_URL` 那一行。
-2. 把那一行写进 `.env`，`docker compose up -d gateway` 重启。
-3. 启动日志应出现 `OpenAI upstream: https://api.openai.com/v1 at /openai/, via http://mareo:***@…`（密码已打码）。
+**明文代理不行。** 实测：从杭州连境外主机的 HTTP CONNECT 代理，`CONNECT api.openai.com:443`
+会在代理回话之前被重置——连错误密码都拿不到 407。目标域名在明文 CONNECT 里可见，TLS 握手的
+SNI 同样可见，两者都会被拦。**所以必须让流量先进加密隧道**，代理放在隧道远端：
+
+```
+gateway 容器 → 172.18.0.1:3129（宿主上的 SSH 隧道）
+             → [加密] → 境外中继 127.0.0.1:3128 (tinyproxy) → api.openai.com
+```
+
+**中继侧**（`deploy/egress-proxy/relay-setup.sh`，在境外主机上跑一次）
+
+- 装 tinyproxy（约 6 MB 常驻，适合小机器），独立配置 `/etc/tinyproxy/mareo.conf` 与独立日志
+- `Allow <网关公网 IP>` + `Allow 127.0.0.1`（隧道流量从环回进来）+ 用户名密码
+- 同时把 `gai.conf` 调成优先 IPv4：那台机器**没有 IPv6 路由**，而 `api.openai.com` 是双栈，
+  代理按 getaddrinfo 顺序挑到 IPv6 就会让客户端看到连接重置（这一条排查了很久，别再踩）
+
+**网关侧**（`deploy/egress-proxy/tunnel-setup.sh`，在杭州跑一次）
+
+- 生成密钥 → 手动加到中继机 `authorized_keys` → 再次运行脚本
+- 用 autossh 起 systemd 单元 `mareo-egress-tunnel`，开机自启、断线自动重连
+- 隧道绑在 **Docker 网桥地址**（不是 127.0.0.1），否则容器里访问不到
+- `.env` 写 `OPENAI_PROXY_URL=http://<user>:<pass>@172.18.0.1:3129`
+
+**启动日志**应出现 `OpenAI upstream: https://api.openai.com/v1 at /openai/, via http://172.18.0.1:3129`
+（只打印地址，凭据从不出现在日志里）。
+
+**实测记录**（2026-10-21）
+
+| 项 | 结果 |
+|---|---|
+| 中继机 → `api.openai.com`（IPv4） | 401，0.2s |
+| 杭州 → 中继 `CONNECT`（明文） | 连接被重置 |
+| 杭州 → SSH 隧道 → 中继 | 401，0.6s |
+| 容器内经隧道调 `gpt-6-sol` | 200，2.8–3.2s |
+| 计费核对（11 输入 / 5 输出，汇率 7） | `actualMicro` 504，`billableMicro` 656，与手工复算一致 |
+| 停掉隧道 | 502 `upstream unreachable`，`actualMicro` 为 NULL（不计费） |
 
 **行为与边界**
 

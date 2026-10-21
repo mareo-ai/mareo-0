@@ -9,12 +9,13 @@ function envNumber(name: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback
 }
 
-/** A proxy URL is worth logging without its password. */
+/** A proxy address is worth logging; its credentials never are. */
 function maskProxy(proxyUrl: string): string {
   try {
     const parsed = new URL(proxyUrl)
-    if (parsed.password !== '') parsed.password = '***'
-    return parsed.toString()
+    // Rebuilt rather than mutated: a credential can sit in either the user or the
+    // password position depending on how the operator wrote the URL.
+    return `${parsed.protocol}//${parsed.hostname}:${parsed.port}`
   } catch {
     return '(无法解析的代理地址)'
   }
