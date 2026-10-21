@@ -3,7 +3,7 @@
 // not, and a launch never duplicates a section.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { catalogYaml, withCatalog } from '../src/model-catalog.js'
+import { LONG_CONTEXT_TOKENS, catalogYaml, withCatalog } from '../src/model-catalog.js'
 
 const GATEWAY = 'https://api.svc.mareo.cn'
 
@@ -71,4 +71,43 @@ test('an empty settings file still produces a valid document', () => {
   const yaml = withCatalog('', GATEWAY)
   assert.match(yaml, /^llm-deepseek:/)
   assert.equal(yaml.includes('\n\n\n'), false)
+})
+
+test('the OpenAI models accept images, so the read tool stops refusing them', () => {
+  const yaml = catalogYaml(GATEWAY)
+  for (const id of ['gpt-6-sol', 'gpt-6-astra']) {
+    const start = yaml.indexOf(`id: ${id}`)
+    assert.ok(start > 0)
+    const entry = yaml.slice(start, yaml.indexOf('input:', start) + 40)
+    assert.match(entry, /input: \[text, image\]/, `${id} 应声明图片输入`)
+  }
+})
+
+test('the price cliff is printed on the card, not just in a document', () => {
+  const yaml = catalogYaml(GATEWAY)
+  const descriptions = yaml.split('\n').filter((line) => line.trimStart().startsWith('description:'))
+  const openai = descriptions.filter((line) => line.includes('Mareo') || line.includes('计费'))
+  assert.ok(openai.length >= 2)
+  for (const line of descriptions.filter((entry) => /最强|编程/.test(entry))) {
+    assert.match(line, /27 万|2 倍/, `模型卡应写明 2 倍计价：${line}`)
+  }
+})
+
+test('compaction triggers below the price cliff, not at 80% of a 1M window', () => {
+  const yaml = catalogYaml(GATEWAY)
+  assert.match(yaml, /^compaction-basic:/m)
+  const ratios = [...yaml.matchAll(/thresholdRatio: ([0-9.]+)/g)].map((match) => Number(match[1]))
+  assert.equal(ratios.length, 2, '两个 OpenAI 模型各一条策略')
+  // 1.05M declared window × ratio must land under the cliff, or compaction can
+  // never prevent the doubled bill.
+  for (const ratio of ratios) {
+    assert.ok(1_050_000 * ratio < LONG_CONTEXT_TOKENS, `阈值 ${ratio} 压不到 ${LONG_CONTEXT_TOKENS} 以下`)
+  }
+  assert.match(yaml, /retainTokens: 40000/, '逐字保留的历史每轮都会重新计费，必须收紧')
+})
+
+test('a second launch rewrites the compaction section instead of stacking it', () => {
+  const once = withCatalog('', GATEWAY)
+  assert.equal(withCatalog(once, GATEWAY), once)
+  assert.equal((once.match(/^compaction-basic:/gm) ?? []).length, 1)
 })

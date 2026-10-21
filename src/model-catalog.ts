@@ -24,11 +24,24 @@ import path from 'node:path'
 
 export const SETTINGS_FILE = 'settings.yaml'
 
+/**
+ * The price cliff every OpenAI model charges past: above this many input tokens
+ * the *whole* request bills at twice the input rate. Declared here because it
+ * drives both the label and the compaction policy below.
+ */
+export const LONG_CONTEXT_TOKENS = 272_000
+
 /** Sections this module owns; anything else in the file is left untouched. */
-const OWNED_SECTIONS = ['llm-deepseek', 'llm-pi-ai']
+const OWNED_SECTIONS = ['llm-deepseek', 'llm-pi-ai', 'compaction-basic']
 
 /** The catalog, in the order the picker shows it: cheap first, strongest last. */
 export function catalogYaml(gatewayUrl: string): string {
+  // Compaction's default trigger is 80% of the declared window — about 840K for
+  // a 1.05M-token model — so an ordinary long session never compacts and then
+  // silently pays double from 272K onward. These policies compact well below the
+  // cliff instead, and keep far less history verbatim, because the retained
+  // history is resent (and charged) on every turn.
+  const compactionThresholdRatio = 0.22
   return `llm-deepseek:
   models:
     - id: deepseek-flash
@@ -51,14 +64,26 @@ llm-pi-ai:
       models:
         - id: gpt-6-sol
           name: Mareo-O-6-Sol
-          description: 复杂编程与多步任务，较贵
+          description: 复杂编程与多步任务；输入超 27 万 token 后整单按 2 倍计费，较贵
           contextWindow: 1050000
           maxTokens: 128000
+          input: [text, image]
         - id: gpt-6-astra
           name: Mareo-O-6-Astra
-          description: 最强推理，最贵
+          description: 最强推理；输入超 27 万 token 后整单按 2 倍计费，最贵
           contextWindow: 1050000
           maxTokens: 128000
+          input: [text, image]
+compaction-basic:
+  modelPolicies:
+    - provider: mareo-openai
+      model: gpt-6-sol
+      thresholdRatio: ${compactionThresholdRatio}
+      retainTokens: 40000
+    - provider: mareo-openai
+      model: gpt-6-astra
+      thresholdRatio: ${compactionThresholdRatio}
+      retainTokens: 40000
 `
 }
 
