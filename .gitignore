@@ -161,3 +161,5 @@ server/deploy/backups/
 
 # Local npm cache used when the default cache is unwritable
 .npm-cache/
+.dev-data
+.staging

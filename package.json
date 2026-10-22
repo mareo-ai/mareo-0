@@ -11,6 +11,7 @@
     "verify:runtime": "node scripts/verify-runtime.mjs .staging",
     "verify:brand": "npm run build && node scripts/verify-brand.mjs",
     "start": "npm run build && npm run stage:runtime && electron-forge start",
+    "dev": "npm run build && node scripts/dev.mjs",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "make": "npm run build && npm run stage:runtime && electron-forge make --arch=arm64",

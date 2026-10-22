@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { cp, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { get } from 'node:https'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -41,6 +41,17 @@ if (options.checkNodeRuntime) {
   await stageNodeRuntime(nodeRuntime, checkDirectory)
   console.log(`Verified ${targetPlatform}/${targetArch} Node ${nodeRuntime.version} archive and layout.`)
   await rm(checkDirectory, { recursive: true, force: true })
+} else if (options.skipInstall) {
+  // Development loop: the dependency tree only changes when the lockfile does,
+  // so editing brand/client.cjs must not reinstall DSH. Refuse rather than guess
+  // when nothing usable is staged yet.
+  if (!(await stagedRuntimeMatchesLockfile())) {
+    throw new Error(
+      'No staged runtime matches runtime/package-lock.json. Run `npm run stage:runtime` once first.',
+    )
+  }
+  await installBrandPackage(dshStagingDirectory)
+  console.log(`Refreshed the brand plugin in ${path.relative(projectDirectory, stagingRoot)}.`)
 } else {
   await rm(stagingRoot, { recursive: true, force: true })
   await mkdir(dshStagingDirectory, { recursive: true })
@@ -66,16 +77,7 @@ if (options.checkNodeRuntime) {
   if (prunedPlatforms > 0) {
     console.log(`Pruned ${prunedPlatforms} package(s) built for another platform.`)
   }
-  // Ship our own package alongside npm dependencies; leave all DSH packages intact.
-  const brandDirectory = path.join(dshStagingDirectory, 'node_modules', 'mareo-brand')
-  await mkdir(brandDirectory, { recursive: true })
-  for (const file of ['package.json', 'index.js']) {
-    await cp(path.join(projectDirectory, 'brand', file), path.join(brandDirectory, file))
-  }
-  const logoUrl = `data:image/png;base64,${(await readFile(path.join(projectDirectory, 'assets', 'logo.png'))).toString('base64')}`
-  const brandClient = await readFile(path.join(projectDirectory, 'brand', 'client.cjs'), 'utf8')
-  await writeFile(path.join(brandDirectory, 'client.js'),
-    `window.__ModuleLoader__.load({ id: 'mareo-brand', factory: (require) => {\nconst exports = {};\nconst logoUrl = ${JSON.stringify(logoUrl)};\n${brandClient}\nreturn exports;\n} });\n`)
+  await installBrandPackage(dshStagingDirectory)
   await stageNodeRuntime(nodeRuntime, nodeStagingDirectory)
   await run(process.execPath, [path.join(projectDirectory, 'scripts', 'verify-runtime.mjs'), stagingRoot, '--platform', targetPlatform, '--arch', targetArch], projectDirectory)
 }
@@ -154,6 +156,43 @@ function parseArguments(argv) {
     platform: value('--platform') ?? process.platform,
     arch: value('--arch') ?? process.arch,
     checkNodeRuntime: argv.includes('--check-node-runtime'),
+    skipInstall: argv.includes('--skip-install'),
+  }
+}
+
+/**
+ * Ships our own package next to the npm dependencies, leaving every DSH package
+ * untouched. The client half is wrapped here because it is loaded as a module
+ * factory by the engine's loader, not as a plain script.
+ */
+async function installBrandPackage(dshStagingDirectory) {
+  const brandDirectory = path.join(dshStagingDirectory, 'node_modules', 'mareo-brand')
+  await mkdir(brandDirectory, { recursive: true })
+  for (const file of ['package.json', 'index.js']) {
+    await cp(path.join(projectDirectory, 'brand', file), path.join(brandDirectory, file))
+  }
+  const logoUrl = `data:image/png;base64,${(await readFile(path.join(projectDirectory, 'assets', 'logo.png'))).toString('base64')}`
+  const brandClient = await readFile(path.join(projectDirectory, 'brand', 'client.cjs'), 'utf8')
+  await writeFile(path.join(brandDirectory, 'client.js'),
+    `window.__ModuleLoader__.load({ id: 'mareo-brand', factory: (require) => {\nconst exports = {};\nconst logoUrl = ${JSON.stringify(logoUrl)};\n${brandClient}\nreturn exports;\n} });\n`)
+}
+
+/**
+ * True when the staged tree was installed from the current lockfile. The staged
+ * lockfile is a copy, so comparing the two is enough: a dependency change edits
+ * runtime/package-lock.json, which then no longer matches.
+ */
+async function stagedRuntimeMatchesLockfile() {
+  const [staged, expected] = await Promise.all([
+    readFile(path.join(dshStagingDirectory, 'package-lock.json')).catch(() => undefined),
+    readFile(path.join(manifestDirectory, 'package-lock.json')),
+  ])
+  if (staged === undefined || !staged.equals(expected)) return false
+  try {
+    await access(path.join(dshStagingDirectory, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'))
+    return true
+  } catch {
+    return false
   }
 }
 
