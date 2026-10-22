@@ -1,7 +1,7 @@
 {
   "name": "mareo",
   "productName": "Mareo",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Mareo desktop host for DeepSeek Harness",
   "main": "dist/src/main.js",
