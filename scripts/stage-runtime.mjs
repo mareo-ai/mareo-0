@@ -50,7 +50,12 @@ if (options.checkNodeRuntime) {
       'No staged runtime matches runtime/package-lock.json. Run `npm run stage:runtime` once first.',
     )
   }
+  // A staging tree made before this pruning existed still carries the deep
+  // trees, so a development refresh cleans them too: it is cheap and idempotent.
+  const prunedStaleAssets = await pruneBuildOnlyAssets(path.join(dshStagingDirectory, 'node_modules'))
+  if (prunedStaleAssets > 0) console.log(`Pruned ${prunedStaleAssets} build- or diagnosis-only directories.`)
   await installBrandPackage(dshStagingDirectory)
+  await reportLongestPaths()
   console.log(`Refreshed the brand plugin in ${path.relative(projectDirectory, stagingRoot)}.`)
 } else {
   await rm(stagingRoot, { recursive: true, force: true })
@@ -67,6 +72,12 @@ if (options.checkNodeRuntime) {
   // file descriptors (EMFILE) for nothing at runtime.
   const prunedTypes = await pruneTypeDeclarations(path.join(dshStagingDirectory, 'node_modules'))
   console.log(`Pruned ${prunedTypes.toLocaleString()} type declaration files from the staged runtime.`)
+  // Windows stops at 260 characters, and Squirrel unpacks the app again before
+  // building the installer, so the deepest path is what decides whether the
+  // Windows build can finish at all. These two trees are compile- or
+  // diagnosis-time only and happen to hold the deepest files.
+  const prunedAssets = await pruneBuildOnlyAssets(path.join(dshStagingDirectory, 'node_modules'))
+  if (prunedAssets > 0) console.log(`Pruned ${prunedAssets} build- or diagnosis-only directories.`)
   // Native packages for other platforms cannot load here, and they are large:
   // the LibreOffice kit alone ships a full office suite per platform/arch.
   const prunedPlatforms = await pruneForeignPlatformPackages(
@@ -79,11 +90,79 @@ if (options.checkNodeRuntime) {
   }
   await installBrandPackage(dshStagingDirectory)
   await stageNodeRuntime(nodeRuntime, nodeStagingDirectory)
+  await reportLongestPaths()
   await run(process.execPath, [path.join(projectDirectory, 'scripts', 'verify-runtime.mjs'), stagingRoot, '--platform', targetPlatform, '--arch', targetArch], projectDirectory)
 }
 
 /**
- * Removes native packages named for a different platform/arch, returning how many
+ * Prints the deepest paths in the staged tree. Windows stops at 260 characters
+ * and Squirrel unpacks the app a second time under its own temporary directory,
+ * so this number is what decides whether the Windows installer can be built.
+ * Printing it turns a build failure into a measurement.
+ */
+async function reportLongestPaths() {
+  const longest = []
+  const pending = [dshStagingDirectory]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    let entries
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        pending.push(entryPath)
+        continue
+      }
+      const relative = path.relative(stagingRoot, entryPath).split(path.sep).join('/')
+      longest.push(relative)
+    }
+  }
+  const deepest = longest.sort((a, b) => b.length - a.length).slice(0, 3)
+  console.log(`Deepest runtime paths (${deepest.length} of ${longest.length.toLocaleString()} files):`)
+  for (const entry of deepest) console.log(`  ${String(entry.length).padStart(3)}  ${entry}`)
+}
+
+/**
+ * Removes trees that are only used to build or diagnose the runtime: package
+ * `sources/` (native code compiled elsewhere) and `assets/diagnose-*` scripts.
+ * Returns how many directories were removed.
+ */
+async function pruneBuildOnlyAssets(rootDirectory) {
+  let removed = 0
+  const pending = [rootDirectory]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    let entries
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const entryPath = path.join(directory, entry.name)
+      // `sources` is where a package keeps the native code it was compiled
+      // from; nothing loads it at runtime.
+      const buildOnly =
+        entry.name === 'sources' ||
+        (path.basename(directory) === 'assets' && entry.name.startsWith('diagnose-'))
+      if (buildOnly) {
+        await rm(entryPath, { recursive: true, force: true })
+        removed += 1
+        continue
+      }
+      pending.push(entryPath)
+    }
+  }
+  return removed
+}
+
+/**
+ * Prunes native packages named for a different platform/arch, returning how many
  * were removed. The suffix is npm's convention for prebuilt binaries
  * (`sharp-darwin-arm64`, `libreoffice-kit-win32-x64`); a package whose name has no
  * such suffix is left alone, because it may be a cross-platform shim that the
