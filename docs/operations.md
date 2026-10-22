@@ -76,6 +76,25 @@ crontab -e
 
 **已知缺口（页面已明确标注，不做假数）**：`install_confirmed` 只有部分客户端上报（首启漏斗不可靠）；客户端还没有"看到充值入口 / 点击充值"事件（充值漏斗前两步无法计算）；活跃时长目前只有进程存活时长。
 
+### 安装 / 启动 / 登录 / 引擎 / 首次任务（与 metrics 命令一致）
+
+这五个数的定义、分子分母与已知盲点，原先单独写在 `metrics.md`；现在并入本节，避免两份口径漂移。
+
+| 指标 | 定义 | 盲点 |
+|---|---|---|
+| 安装成功率 | 有 `install_confirmed` 的账户数 ÷ 下载完成次数 | 装好但**登录失败**的人不计入分子，所以它同时受登录可用性影响（保守口径，故意如此） |
+| 启动成功率 | `launch` 中 `ok=true` 的数量 ÷ `launch` 总数（按平台/版本分组） | 只有打包版上报，开发模式不上报 |
+| 登录稳定性 | `signin` 按 `result` 分组：`ok / wrong-code / expired / too-many-attempts / send-failed / unreachable / cancelled` | `send-*` 是发验证码阶段的结果，与 `cancelled`（用户关窗）能区分漏斗漏在哪一步 |
+| 引擎异常退出率 | `harness_exit` 数 ÷ launch 成功数 × 1000 | 正常退出（关窗、退出登录）不上报 |
+| 首次任务成功 | 每账户首个 `status=200` 存在即计入 ÷ 有模型请求的账户数 | "第一次就拿到响应"≠"用户满意" |
+
+下载完成次数（安装成功率的分母）来自 OSS 访问日志，`npm run downloads:oss` 统计"HTTP 200 的 GetObject 且对象名是 `.dmg`/`.exe`"，
+自动排除图标、清单、nupkg、目录列举与 HEAD 请求；日志按小时投递，最近一小时为空是正常的。
+⚠️ 日志不要留在公共读的 `mareo-downloads` bucket：访客 IP 与 UA 会一起公开。转存到私有 bucket，并在 `.env.oss` 设 `OSS_LOG_BUCKET`。
+
+数据边界：`events` 只有四个事件名且写成白名单，字段固定为 `accountId`（可空）、`name`、`version`、`platform`、`ts`、`detail`（≤500 字符）；
+单次请求最多 20 条事件；匿名事件按来源地址限流（默认每小时 60 条）且不落库 IP；用户关闭统计后客户端不再发送任何请求。
+
 ## 时间口径
 
 **所有"今日/近 7 天"都按北京时间自然日切分**（`server/src/clock.ts`）：
@@ -89,7 +108,7 @@ crontab -e
 
 ### 四条硬规则
 
-1. **金额只在与权威账单对账后才允许报出。** `npm run cost` 必须带 `--bill <北京日>=<元>`，报表会把"我们算的 / 你的账单 / 偏差"并列打印；偏差 >1% 时先查代码 bug，不向业务方给结论。
+1. **金额只在与权威账单对账后才允许报出。** `npm --prefix server run cost` 必须带 `--bill <北京日>=<元>`，报表会把"我们算的 / 你的账单 / 偏差"并列打印；偏差 >1% 时先查代码 bug，不向业务方给结论。
 2. **只用权威数据源计价。** 计费只认上游返回的 usage token；`promptChars`/`completionChars` 是**字节数**，仅用于趋势与异常检测，**不允许进入任何金额计算**。
 3. **先盘点已有数据，再提方案。** 说"我们不知道 X"之前，必须确认：上游有没有给、库里有没有存、客户端有没有。（2026-09 的教训：网关一直在收到 usage 却只数了字节，成本只能靠猜。）
 4. **每个测量口径都要有可控实验或生产数据验证**，并在代码注释里写明出处。
@@ -126,7 +145,7 @@ ssh root@114.55.15.112 'cd /srv/mareo/server/deploy && docker compose exec -T ga
   --bill 2026-09-16=12.34'
 
 # 本地跑（用数据库副本）
-DB_PATH=/path/to/mareo.db npm run --prefix server cost -- --bill 2026-09-16=12.34
+DB_PATH=/path/to/mareo.db npm --prefix server run cost -- --bill 2026-09-16=12.34
 ```
 
 输出包含：每日请求数 / 已计价数 / 缺 usage / 历史行 / 输出与思考 token / 输入 token / 命中率 / 成本 / 账单 / 偏差；以及指定日期的**每用户成本**（人均、P50/P90/P99、Top 10）与**每 session 成本**。
@@ -144,7 +163,7 @@ DB_PATH=/path/to/mareo.db npm run --prefix server cost -- --bill 2026-09-16=12.3
 
 只保存标题文本（≤120 字符），**不保存对话正文、文件路径、文件内容**。报表按规则把标题归入「编码/调试、写作/文档、表格/数据、演示/PPT、调研/检索、文件整理、其它」，规则在 `server/src/session-labels.ts`（透明、免费，将来可换模型分类）。
 
-`npm run cost` 的每 session 区块会列出：任务类型分布 + 每个会话的标题、请求数、成本。
+`npm --prefix server run cost` 的每 session 区块会列出：任务类型分布 + 每个会话的标题、请求数、成本。
 
 ## 指标定义
 
@@ -188,7 +207,7 @@ DB_PATH=/path/to/mareo.db npm run --prefix server cost -- --bill 2026-09-16=12.3
 |---|---|---|
 | 字符消耗 | `usage.promptChars + completionChars` 按天 | 成本的代理指标 |
 | 单账户用量 / Top 账户占比 | `usage` 按账户聚合 | 成本集中度、异常用量排查 |
-| 精确 token 与费用 | `usage` 的 token 列（含缓存命中/未命中/思考），按官方价目表换算 | ✅ 2026-09-15 上线，见上文「成本核算」；`npm run cost` 直接出结果 |
+| 精确 token 与费用 | `usage` 的 token 列（含缓存命中/未命中/思考），按官方价目表换算 | ✅ 2026-09-15 上线，见上文「成本核算」；`npm --prefix server run cost` 直接出结果 |
 
 ### 版本与更新
 
@@ -338,7 +357,7 @@ docker compose exec -T gateway sh -c '
 
 ## 节奏
 
-- **每天**：在容器里跑 `node dist/src/metrics.js`（完整形式见 [`metrics.md`](metrics.md)）看五个数——今日活跃、模型成功率与 429、**今日新增账户/安装**、下载次数、字符消耗。
+- **每天**：在容器里跑 `node dist/src/metrics.js` 看五个数——今日活跃、模型成功率与 429、**今日新增账户/安装**、下载次数、字符消耗（定义见上文「安装 / 启动 / 登录 / 引擎 / 首次任务」）。
 - **每周**：漏斗转化、同期群留存、成本 Top 账户、版本分布；并逐个新用户核对启动/登录/首次任务。
 - **每月**：成本与定价、Windows 签名决策、是否推进 Phase 2 自动更新。
 

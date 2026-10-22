@@ -1,121 +1,87 @@
 # Mareo
 
-Mareo is a thin macOS desktop host for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It packages the published DSH runtime without forking or patching its source, starts the local Web UI automatically, and displays it in a secured Electron window.
+macOS 与 Windows 上的桌面客户端，把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）打包成一个开箱可用的应用：不用装 Node、不用配 API key、不用碰命令行。
 
-## V0 scope
+用户只面对 Mareo 账号；模型调用经 Mareo 网关转发，厂商密钥只存在于服务器。
 
-- macOS arm64
-- unsigned internal-test DMG
-- pinned `@deepseek-ai/dsh` runtime
-- pinned official Node.js runtime bundled inside the app
-- isolated user data under `~/Library/Application Support/Mareo`
+## 现在能做什么
 
-The current version intentionally excludes signing, notarization, automatic updates, Windows builds, tray behavior, deep DSH UI customization, and IPC transport.
+| 能力 | 状态 |
+|---|---|
+| macOS（arm64）+ Windows（x64） | ✅ 已发布，安装包已签名（macOS Developer ID + 公证；Windows OV 云签名） |
+| 模型 | ✅ `Mareo-D-V41-Flash`、`Mareo-D-V4-Pro`（DeepSeek）；`Mareo-O-6-Sol`、`Mareo-O-6-Astra`（OpenAI） |
+| 账号 | ✅ 邮箱验证码登录；额度条显示今日免费额度与余额 |
+| 付费 | ✅ 支付宝扫码充值（微信待商户号） |
+| 更新 | ⚠️ 提示式：检查到新版本会提示并给下载链接，可设最低版本强制更新；**不会**自动下载安装 |
+| 图片输入、联网搜索 | ✅ 由模型目录声明，未在代码里硬编码 |
 
-## Development
+当前版本号与已发布版本、已知问题都在 [docs/current-state.md](docs/current-state.md)——**这里是唯一的"现在是什么状态"**。
 
-Install the desktop build dependencies:
-
-```sh
-npm install
-```
-
-Run Mareo:
+## 5 分钟跑起来
 
 ```sh
-npm start
+npm ci                       # 客户端依赖
+npm --prefix server ci       # 网关依赖
+npm start                    # 起 Electron（会先 stage 运行时）
 ```
 
-The staging step installs the locked DSH dependency tree and verifies both DSH and the bundled Node executable before Electron starts. The official Node archive is cached under `.cache/node` after its SHA-256 checksum matches the value pinned in `runtime/package.json`.
+需要 Node >= 24（网关用内置 `node:sqlite`）。从源码跑时客户端默认连本机网关 `http://127.0.0.1:3000`，
+打包版连 `https://api.svc.mareo.cn`；`MAREO_GATEWAY_URL` 可覆盖两者。
 
-Useful checks:
+本地网关：
+
+```sh
+cd server
+cp .env.example .env        # 填你自己的 DEEPSEEK_API_KEY
+npm start                   # 网关在 http://127.0.0.1:3000
+npm run issue-token -- Alice # 签发一个登录令牌
+```
+
+## 常用检查
 
 ```sh
 npm run typecheck
-npm test
-npm run verify:runtime
-npm run verify:brand
-npm run server:test
+npm test                       # 客户端测试
+npm --prefix server test       # 网关测试
+npm run verify:runtime         # 钉版 DSH + Node 校验
+npm run verify:brand           # 插件组成 + 鉴权 Web 能否启动
 ```
 
-## Package
-
-Create the macOS arm64 application and DMG:
+## 打包
 
 ```sh
-npm run make
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run make
 npm run verify:package
 ```
 
-Artifacts are written to:
+> 这台机器直连 GitHub 会超时，`ELECTRON_MIRROR` 不是可选项。产物在 `out/Mareo-darwin-arm64/Mareo.app`
+> 与 `out/make/`。Windows 必须在 Windows 上构建，见 [docs/build-windows.md](docs/build-windows.md)。
 
-```text
-out/Mareo-darwin-arm64/Mareo.app
-out/make/Mareo-0.1.0-arm64.dmg
+## 结构
+
+```
+src/        Electron 主进程：启动编排、登录、DSH 生命周期、更新检查、模型目录、品牌 overlay
+brand/      注入 DSH 的客户端插件：额度条、充值面板、推荐位
+runtime/    DSH 与 Node 的钉版（package.json）
+server/     网关：鉴权、额度、计费、账本、支付、模型代理
+website/    官网（静态）
+scripts/    构建、发布、部署、OSS 工具
+docs/       全部文档，入口是 docs/README.md
 ```
 
-The V0 DMG is unsigned and is intended only for internal testing.
+模型流量的走向、四条不能碰的接缝、两个上游为什么协议不同：见 [docs/architecture.md](docs/architecture.md)。
 
-The desktop brand is `Mareo`, with bundle ID `app.mareo.desktop`. The application and Dock use `assets/app-icon.png`: the original logo on a white rounded plate, with transparent margins and a subtle shadow. The startup page independently uses `assets/logo-white.png`, a white-background composite. Neither asset redraws the original `assets/logo.png`. When the original changes, run `python3 scripts/compose-app-icon.py` and `python3 scripts/flatten-logo.py` (requires Pillow), then commit the original and generated images. Normal development and packaging use the committed images and do not require Python. Forge generates the macOS application icon automatically using `sips` and `iconutil`. The existing `Mareo` user-data directory is retained so branding changes do not reset settings or conversations.
+## 文档怎么读
 
-## DSH brand extension
+- 第一次接手：**[docs/README.md](docs/README.md)**（按任务导航）→ [architecture.md](docs/architecture.md) → [current-state.md](docs/current-state.md)
+- 要动钱：先读 [docs/money/standard.md](docs/money/standard.md)
+- 要发版：docs/release.md、docs/signing.md
+- 参与协作的规则：[AGENTS.md](AGENTS.md)
 
-`brand/` owns the `mareo-brand` plugin. Staging packages its browser factory and embedded original logo alongside the unmodified npm dependencies. The launcher writes an app-owned `mareo-brand.patch.json` under DSH home and passes it through the official `--patch` option. The overlay disables `ui-brand-official` and loads our package by its installed file URL, so moving the application does not break package resolution. It never overwrites the user's profile or settings.
+## 隐私
 
-The brand presentation uses `sidebar.brand.mark`, `sidebar.brand.name`, `conversation.hero.brand.mark`, and `shell.overlay`. The sidebar shows the Mareo logo and a single-line `Mareo` name; `Built on DeepSeek Harness` remains at the bottom right, outside the primary brand area. The default hero headline and Preview badge are retained. There is no DOM rewriting, global CSS override, source patch, or fork. Attribution follows the [official brand guidelines](https://github.com/deepseek-ai/deepseek-harness/blob/master/BRAND_GUIDELINES.md).
+诊断统计、会话标题、模型请求分别处理什么，见 [docs/privacy.md](docs/privacy.md)（与 <https://mareo.cn/privacy.html> 同步）。
 
-The same launcher overlay disables `ui-settings-models`, removing the Models settings page (API keys, endpoint URLs, and provider management) and its bundled welcome and API-key onboarding dialogs. The independent `ui-model-selection` plugin remains enabled for model selection in chat. This hides configuration entry points; it does not remove existing user configuration or restrict the model catalog to gateway-supported models.
+## 第三方
 
-Run `npm run verify:brand` after staging, or `node scripts/verify-brand.mjs "out/Mareo-darwin-arm64/Mareo.app/Contents/Resources"` after packaging. This boots an isolated temporary DSH home and checks authenticated loading and brand composition without an API key. Add `--serve` after the resources path to keep the test instance available for visual checks. When upgrading DSH, also verify sidebar folding, both themes, and attribution placement in the UI.
-
-## Model access and account
-
-End users never configure a DeepSeek API key. Mareo authenticates against the
-Mareo gateway ([`server/README.md`](server/README.md)), stores the user's
-gateway token with Electron `safeStorage` (encrypted into `account.dat` under
-the app's user-data directory), and hands model credentials to DSH only as
-launch environment variables when the runtime starts:
-
-```text
-DEEPSEEK_API_KEY = the user's gateway token
-DEEPSEEK_BASE_URL = the gateway URL
-```
-
-DSH's DeepSeek adapter reads both from the launch environment, so the bundled
-runtime and its UI stay untouched.
-
-- An unauthenticated launch shows the sign-in screen (`assets/signin.html`),
-  which accepts a gateway token pasted by the user; validation and storage
-  happen in the Electron main process.
-- Packaged builds talk to the production gateway at `https://api.svc.mareo.cn`;
-  running from source (`npm start`) defaults to a local gateway at
-  `http://127.0.0.1:3000`. The `MAREO_GATEWAY_URL` environment variable
-  overrides either default (see the `GATEWAY_URL` constant in `src/account.ts`).
-- The gateway (`server/`) proxies model traffic to DeepSeek with your own API
-  key, enforces per-user daily limits, and records one usage row per request.
-  Run it locally with `npm run server:start` (after filling `server/.env`) and
-  issue a user token with `npm run server:issue-token -- <name>`.
-- WeChat QR sign-in is designed for a later phase in
-  [`server/docs/wechat-login-design.md`](server/docs/wechat-login-design.md);
-  until its credentials exist, self-issued gateway tokens remain the only login.
-
-## Runtime boundary
-
-```text
-Mareo Electron main process
-    -> bundled official Node.js
-        -> published @deepseek-ai/dsh CLI
-            -> 127.0.0.1 on an OS-assigned port
-                -> secured Mareo BrowserWindow
-```
-
-Model traffic leaves DSH as ordinary DeepSeek chat-completions requests against
-`DEEPSEEK_BASE_URL`. In a normal run that endpoint is the Mareo gateway, which
-authenticates the user's token and forwards each request to DeepSeek with your
-API key; running the gateway pointed at `https://api.deepseek.com` is therefore
-the only place the key lives. A DeepSeek key never reaches an end-user machine:
-it is not stored, displayed, or shipped by Mareo.
-
-The DSH launch token is used only for the local authenticated URL and is redacted from Mareo's runtime log. Mareo never runs `npx` or downloads DSH on an end user's machine.
-
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the primary packaged runtimes.
+打包进应用的运行时与依赖清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
