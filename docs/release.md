@@ -34,7 +34,7 @@ git push --atomic origin main v0.1.3
 
 ## 官网部署
 
-官网文件由发布流程自动同步（`scripts/deploy-site.mjs`），所以改了 `website/` 之后**必须在发版后才会生效**。需要立刻上线（例如只改了文案，不想发版）时，本地跑同一条命令：
+官网的页面结构与维护约定见 [website.md](website.md)。官网文件由发布流程自动同步（`scripts/deploy-site.mjs`），所以改了 `website/` 之后**必须在发版后才会生效**。需要立刻上线（例如只改了文案，不想发版）时，本地跑同一条命令：
 
 ```sh
 ECS_HOST=root@114.55.15.112 MAREO_DEPLOY_KEY=~/.ssh/mareo-0.pem npm run deploy:site

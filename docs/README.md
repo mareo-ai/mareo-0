@@ -15,6 +15,8 @@
 | **改 UI / 页面** | [design/product-design-principles.md](design/product-design-principles.md) → [design/themes/dashboard.md](design/themes/dashboard.md) → [design/web-interface-guidelines.md](design/web-interface-guidelines.md) |
 | **改隐私说明** | `docs/privacy.md` 与 `website/privacy.html` **必须同步**，英文版 `privacy-en.html` 一起改 |
 | **查"现在是什么状态"** | [current-state.md](current-state.md)（唯一来源，带核对日期） |
+| **遇到报错 / 排查故障** | [troubleshooting.md](troubleshooting.md)（按症状索引） |
+| **改官网** | [website.md](website.md) |
 
 ## 规则在哪
 
@@ -36,6 +38,8 @@ docs/
 ├── gateway.md                网关：路由、表结构、计费、额度、支付、双上游
 ├── gateway-deploy.md         网关部署与运维（阿里云 + 境外出口）
 ├── operations.md             运营口径：看什么、怎么算、多久看一次
+├── website.md                官网：页面结构、部署、下载清单、浏览计数
+├── troubleshooting.md        排查手册：按症状索引，踩过的坑都在这里
 ├── release.md / signing.md / build-windows.md    发布链路
 ├── updates.md                客户端更新机制（当前是提示式）
 ├── session-log-downgrade.md  会话日志与运行时降级（回滚风险）
@@ -54,3 +58,4 @@ docs/
 1. **状态不散落**：版本号、schema 版本、账号数这类会变的事实，只写在 [current-state.md](current-state.md)，并带 `最后核对` 日期。其它文档引用它，不复制。
 2. **能跑的命令才写进文档**：写命令前先执行一次。历史上 `npm run cost`（根目录不存在）这类错误就是没跑就写下来的。
 3. **历史文档不追改**：决策记录（`money/designs/`、`design/2026-*`）里的旧版本号是当时的事实，不改；只要在标题标明日期即可。
+4. **踩过的坑必须回流**：修完一个非平凡问题，**在同一个分支**里往 [troubleshooting.md](troubleshooting.md) 加一条（症状 → 根因 → 怎么确认 → 修法）。只写在 PR 描述里等于没写——PR 不会有人回头翻。

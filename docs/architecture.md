@@ -78,6 +78,6 @@ OpenAI 上游必须经过加密隧道：杭州到 `api.openai.com` 的明文 CON
 | `brand/` | 注入 DSH 的客户端插件：额度条、充值面板、推荐位 |
 | `runtime/` | DSH 与 Node 的**钉版**（`package.json`） |
 | `server/` | 网关：路由、代理、计费、额度、账本、支付、报表 |
-| `website/` | 官网（静态），由发布流程同步 |
+| `website/` | 官网（静态），由发布流程同步；见 [website.md](website.md) |
 | `docs/` | 本目录 |
 | `scripts/` | 构建、发布、部署、OSS 工具 |
