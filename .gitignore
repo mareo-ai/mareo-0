@@ -163,3 +163,4 @@ server/deploy/backups/
 .npm-cache/
 .dev-data
 .staging
+.worktrees
