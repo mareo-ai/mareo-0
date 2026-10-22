@@ -45,6 +45,7 @@ npm test                       # 客户端测试
 npm --prefix server test       # 网关测试
 npm run verify:runtime         # 钉版 DSH + Node 校验
 npm run verify:brand           # 插件组成 + 鉴权 Web 能否启动
+npm run dev                    # 改界面：复用依赖、只同步品牌插件，⌘R 生效
 ```
 
 ## 打包

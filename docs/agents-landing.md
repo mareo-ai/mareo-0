@@ -24,6 +24,19 @@ npm start                  # 本地起 Electron
 
 改客户端或改运行时钉版时，**前两条 verify 至少都要跑**。
 
+### 改界面时用什么循环
+
+`npm start` 会重装整棵 DSH 依赖树（分钟级），改个按钮不值当。界面（`brand/`）用：
+
+```sh
+npm run dev      # 复用已装的依赖，只同步品牌插件，然后启动
+```
+
+- 改 `brand/client.cjs` → 自动同步 → 在窗口里按 **⌘R** 即可看到，不用重启、不用打包
+- 改 `src/`（Electron 主进程）**不覆盖**：那需要重启应用
+- 开发默认使用独立的 `.dev-data` 数据目录（`MAREO_USER_DATA` 可覆盖）。**不要**让它指向 `~/Library/Application Support/Mareo`：发行版正在用一个 DSH home，两个引擎抢同一个会话就会触发 [session-log-downgrade.md](session-log-downgrade.md) 里那个事故
+- 第一次跑 `npm run dev` 之前需要有一次完整的 `npm run stage:runtime`（否则 `--skip-install` 会明确报错）
+
 ## 怎么验证（项目规矩：看存储值，不看 HTTP 200）
 
 - 功能类改动 → 补 `node:test`；涉及真实进程的用**真实 spawn 一个假 DSH**，不要 mock 掉主流程（参考 `tests/dsh-runtime.test.ts`）。
