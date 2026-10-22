@@ -1,7 +1,6 @@
-// The meter is the only part of the quota a user sees. It shows money — today's
-// free allowance and the wallet behind it — and never a token count, a model
-// price or the settlement rate. What it renders, and what it refuses to render,
-// is worth pinning down.
+// The sidebar shows whether the user can continue and which source is available,
+// without exposing the free amount or the Wallet balance. Actual money remains
+// visible in the account and payment screens.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
@@ -110,58 +109,61 @@ function full(overrides: Partial<Snapshot> = {}): Snapshot {
   return { ...base, ...overrides }
 }
 
-test('the meter shows both buckets in yuan and nothing else', async () => {
+test('the status strip shows two available sources without amounts or percentages', async () => {
   const node = await meterHarness(full()).render()
   assert.ok(node !== null)
   const text = JSON.stringify(node)
-  assert.match(text, /今日免费剩余/)
-  assert.match(text, /¥3\.80 \/ ¥10\.00/)
-  assert.match(text, /Mareo 余额/)
-  assert.match(text, /¥23\.50/)
-  assert.match(text, /可用合计/)
-  assert.match(text, /¥27\.30/)
+  assert.match(text, /可以继续使用/)
+  assert.match(text, /每日都有免费额度/)
+  assert.match(text, /今日免费 · 可用/)
+  assert.match(text, /Mareo 余额 · 可用/)
   assert.match(text, /充值余额 →/)
   assert.equal(node.tag, 'button', 'the whole card is a keyboard-accessible recharge action')
   assert.equal(typeof (node.props as { onClick?: unknown }).onClick, 'function')
-  assert.match(text, /progressbar/)
-  assert.match(text, /"aria-valuenow":38/, 'the bar represents the remaining free allowance')
-  // Micro-yuan stops at the gateway: every amount on screen is in yuan.
-  assert.doesNotMatch(text, /[0-9]{7}/)
-  assert.doesNotMatch(text, /已用 62%/, 'the percentage is replaced by the amount')
-  assert.doesNotMatch(text, /token/i)
+  assert.match(text, /"aria-hidden":true/, 'the two colored segments are decorative; text names each state')
+  assert.doesNotMatch(text, /¥|progressbar|可用合计|token/i)
+  assert.doesNotMatch(text, /10\.00|23\.50|27\.30/, 'the daily allowance and wallet amounts stay out of the sidebar')
 })
 
-test('an exhausted account is told it is out and offered a top-up', async () => {
-  const spent = { limitMicro: 10_000_000, usedMicro: 10_000_000, remainingMicro: 0, resetAt: RESET_AT }
-  const harness = meterHarness(
-    full({
-      quota: { ...full().quota, spentMicro: 10_000_000, remainingMicro: 0, usedPercent: 100, exhausted: true },
-      free: spent,
-      wallet: { balanceMicro: 0 },
-      total: { remainingMicro: 0 },
-    }),
-  )
-  const text = JSON.stringify(await harness.render())
-  assert.match(text, /额度已用完 · 充值后继续使用/)
-  assert.match(text, /免费额度北京时间 0 点后恢复/)
-  assert.match(text, /充值余额 →/)
-  assert.match(text, /"tag":"button"/)
-  // No task, no ad, no simulated earning: the only way on is paying.
-  assert.doesNotMatch(text, /模拟/)
+test('used-up free allowance still allows use when the Wallet has credit', async () => {
+  const snapshot = full({
+    free: { limitMicro: 10_000_000, usedMicro: 10_000_000, remainingMicro: 0, resetAt: RESET_AT },
+    wallet: { balanceMicro: 23_500_000 },
+  })
+  const text = JSON.stringify(await meterHarness(snapshot).render())
+  assert.match(text, /可以继续使用/)
+  assert.match(text, /今日免费已用完 · 明日恢复/)
+  assert.match(text, /今日免费 · 已用完/)
+  assert.match(text, /Mareo 余额 · 可用/)
+  assert.doesNotMatch(text, /¥|暂时无法继续使用/)
 })
 
-test('a wallet pushed negative by an allowed overdraft reads as a debt', async () => {
-  const harness = meterHarness(
-    full({
-      free: { limitMicro: 10_000_000, usedMicro: 9_000_000, remainingMicro: 1_000_000, resetAt: RESET_AT },
-      wallet: { balanceMicro: -200_000 },
-      total: { remainingMicro: 1_000_000 },
-    }),
-  )
-  const text = JSON.stringify(await harness.render())
-  assert.match(text, /-¥0\.20/)
-  assert.match(text, /可用合计/)
-  assert.match(text, /¥1\.00/)
+test('an exhausted account is offered recharge and told free use returns tomorrow', async () => {
+  const snapshot = full({
+    quota: { ...full().quota, spentMicro: 10_000_000, remainingMicro: 0, usedPercent: 100, exhausted: true },
+    free: { limitMicro: 10_000_000, usedMicro: 10_000_000, remainingMicro: 0, resetAt: RESET_AT },
+    wallet: { balanceMicro: 0 },
+    total: { remainingMicro: 0 },
+  })
+  const text = JSON.stringify(await meterHarness(snapshot).render())
+  assert.match(text, /暂时无法继续使用/)
+  assert.match(text, /今日免费已用完 · 明日恢复/)
+  assert.match(text, /Mareo 余额 · 暂无/)
+  assert.match(text, /充值后继续 →/)
+  assert.doesNotMatch(text, /¥|模拟/)
+})
+
+test('an overdrawn Wallet does not block daily free use or show a negative amount', async () => {
+  const snapshot = full({
+    free: { limitMicro: 10_000_000, usedMicro: 9_000_000, remainingMicro: 1_000_000, resetAt: RESET_AT },
+    wallet: { balanceMicro: -200_000 },
+    total: { remainingMicro: 1_000_000 },
+  })
+  const text = JSON.stringify(await meterHarness(snapshot).render())
+  assert.match(text, /可以继续使用/)
+  assert.match(text, /今日免费 · 可用/)
+  assert.match(text, /Mareo 余额 · 暂无/)
+  assert.doesNotMatch(text, /¥|暂时无法继续使用/)
 })
 
 test('nothing renders when the gateway is not running a quota for this account', async () => {

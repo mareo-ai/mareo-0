@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1010" height="330" viewBox="0 0 1010 330" role="img" aria-label="Mareo 额度卡片三种状态：免费和余额可用、仅余额可用、两者都不可用">
+  <rect width="1010" height="330" fill="#f7f8fa"/>
+  <text x="44" y="40" font-size="18" font-weight="600" fill="#1c2430" font-family="-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif">一条状态条 · 三种使用状态</text>
+  <g font-family="-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif">
+    <text x="44" y="84" font-size="13" fill="#667085">免费与余额都可用</text>
+    <text x="370" y="84" font-size="13" fill="#667085">免费用完，仍可继续</text>
+    <text x="696" y="84" font-size="13" fill="#667085">两者都用完</text>
+    <g transform="translate(40 100)">
+      <rect x="0" y="0" width="274" height="194" rx="12" fill="#fff" stroke="#d9dfe8"/>
+      <text x="16" y="34" font-size="15" font-weight="600" fill="#1c2430">可以继续使用</text>
+      <text x="16" y="62" font-size="12" fill="#667085">每日都有免费额度</text>
+      <rect x="16" y="79" width="118" height="8" rx="4" fill="#3d6bfe"/>
+      <rect x="138" y="79" width="118" height="8" rx="4" fill="#8fa8ff"/>
+      <text x="16" y="109" font-size="11" fill="#667085">今日免费 · 可用</text>
+      <text x="256" y="109" text-anchor="end" font-size="11" fill="#667085">Mareo 余额 · 可用</text>
+      <text x="16" y="150" font-size="12" font-weight="600" fill="#3d6bfe">充值余额 →</text>
+    </g>
+    <g transform="translate(366 100)">
+      <rect x="0" y="0" width="274" height="194" rx="12" fill="#fff" stroke="#d9dfe8"/>
+      <text x="16" y="34" font-size="15" font-weight="600" fill="#1c2430">可以继续使用</text>
+      <text x="16" y="62" font-size="12" fill="#667085">今日免费已用完 · 明日恢复</text>
+      <rect x="16" y="79" width="118" height="8" rx="4" fill="#e4e7ec"/>
+      <rect x="138" y="79" width="118" height="8" rx="4" fill="#8fa8ff"/>
+      <text x="16" y="109" font-size="11" fill="#667085">今日免费 · 已用完</text>
+      <text x="256" y="109" text-anchor="end" font-size="11" fill="#667085">Mareo 余额 · 可用</text>
+      <text x="16" y="150" font-size="12" font-weight="600" fill="#3d6bfe">充值余额 →</text>
+    </g>
+    <g transform="translate(692 100)">
+      <rect x="0" y="0" width="274" height="194" rx="12" fill="#fff" stroke="#d9dfe8"/>
+      <text x="16" y="34" font-size="15" font-weight="600" fill="#1c2430">暂时无法继续使用</text>
+      <text x="16" y="62" font-size="12" fill="#667085">今日免费已用完 · 明日恢复</text>
+      <rect x="16" y="79" width="118" height="8" rx="4" fill="#e4e7ec"/>
+      <rect x="138" y="79" width="118" height="8" rx="4" fill="#e4e7ec"/>
+      <text x="16" y="109" font-size="11" fill="#667085">今日免费 · 已用完</text>
+      <text x="256" y="109" text-anchor="end" font-size="11" fill="#667085">Mareo 余额 · 暂无</text>
+      <text x="16" y="150" font-size="12" font-weight="600" fill="#3d6bfe">充值后继续 →</text>
+    </g>
+  </g>
+</svg>
