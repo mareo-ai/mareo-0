@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { get } from 'node:https'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -50,6 +50,12 @@ if (options.checkNodeRuntime) {
   ])
 
   await runNpm(['ci', '--omit=dev'], dshStagingDirectory)
+  // Type declarations are for the compiler, never for the running engine, and
+  // they are a third of the file count in this tree. The macOS signer walks
+  // every file and opens each one, so shipping them costs the release build its
+  // file descriptors (EMFILE) for nothing at runtime.
+  const prunedTypes = await pruneTypeDeclarations(path.join(dshStagingDirectory, 'node_modules'))
+  console.log(`Pruned ${prunedTypes.toLocaleString()} type declaration files from the staged runtime.`)
   // Ship our own package alongside npm dependencies; leave all DSH packages intact.
   const brandDirectory = path.join(dshStagingDirectory, 'node_modules', 'mareo-brand')
   await mkdir(brandDirectory, { recursive: true })
@@ -62,6 +68,37 @@ if (options.checkNodeRuntime) {
     `window.__ModuleLoader__.load({ id: 'mareo-brand', factory: (require) => {\nconst exports = {};\nconst logoUrl = ${JSON.stringify(logoUrl)};\n${brandClient}\nreturn exports;\n} });\n`)
   await stageNodeRuntime(nodeRuntime, nodeStagingDirectory)
   await run(process.execPath, [path.join(projectDirectory, 'scripts', 'verify-runtime.mjs'), stagingRoot, '--platform', targetPlatform, '--arch', targetArch], projectDirectory)
+}
+
+/**
+ * Removes TypeScript declaration files from a staged dependency tree, returning
+ * how many were removed. They are read by the compiler and never by Node, and in
+ * this tree they are about a third of all files — which the macOS signer has to
+ * walk and open one by one.
+ */
+async function pruneTypeDeclarations(rootDirectory) {
+  const declaration = /\.d\.(ts|cts|mts)$/
+  let removed = 0
+  const pending = [rootDirectory]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    let entries
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        pending.push(entryPath)
+      } else if (declaration.test(entry.name)) {
+        await unlink(entryPath).catch(() => undefined)
+        removed += 1
+      }
+    }
+  }
+  return removed
 }
 
 function parseArguments(argv) {

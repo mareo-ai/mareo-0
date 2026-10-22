@@ -74,11 +74,14 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # @electron/osx-sign walks the expanded DSH runtime with concurrent
-          # file probes. The macOS runner's default descriptor limit is too low
-          # for DSH 0.2.1 and fails with EMFILE before notarization starts.
+          # @electron/osx-sign walks the expanded DSH runtime and opens every
+          # file it meets. Raising ulimit alone was not enough: macOS also caps a
+          # process at kern.maxfilesperproc (10240 on a default runner), so the
+          # kernel kept returning EMFILE while `ulimit -n` reported 65536.
+          sudo sysctl -w kern.maxfiles=262144
+          sudo sysctl -w kern.maxfilesperproc=65536
           ulimit -n 65536
-          echo "Open-file limit for signing: $(ulimit -n)"
+          echo "Kernel per-process cap: $(sysctl -n kern.maxfilesperproc); shell limit: $(ulimit -n)"
           npm run make
       - name: Verify signature and notarization
         run: |
