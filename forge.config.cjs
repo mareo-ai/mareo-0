@@ -56,7 +56,7 @@ module.exports = {
         NSAllowsLocalNetworking: true,
       },
     },
-    extraResource: [".staging/dsh-runtime", ".staging/node-runtime"],
+    extraResource: [".staging/rt", ".staging/node-runtime"],
     // Signs Mareo.exe during packaging, before Squirrel packs it into the
     // installer; the hook itself decides which files are ours.
     windowsSign,

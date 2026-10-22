@@ -177,7 +177,7 @@ async function loadKnownEventTypes(runtimeDirectory) {
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   const positionals = []
-  let runtimeDirectory = path.join(projectRoot, '.staging', 'dsh-runtime')
+  let runtimeDirectory = path.join(projectRoot, '.staging', 'rt')
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === '--runtime') {
       runtimeDirectory = path.resolve(args[index + 1] ?? '')

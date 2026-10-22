@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url'
 const projectDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const manifestDirectory = path.join(projectDirectory, 'runtime')
 const stagingRoot = path.join(projectDirectory, '.staging')
-const dshStagingDirectory = path.join(stagingRoot, 'dsh-runtime')
+// `rt`, not `dsh-runtime`: Windows stops at 260 characters and Squirrel
+// adds its own temporary prefix on top of this one.
+const dshStagingDirectory = path.join(stagingRoot, 'rt')
 const nodeStagingDirectory = path.join(stagingRoot, 'node-runtime')
 const manifest = JSON.parse(await readFile(path.join(manifestDirectory, 'package.json'), 'utf8'))
 
@@ -149,7 +151,10 @@ async function pruneBuildOnlyAssets(rootDirectory) {
       // from; nothing loads it at runtime.
       const buildOnly =
         entry.name === 'sources' ||
-        (path.basename(directory) === 'assets' && entry.name.startsWith('diagnose-'))
+        (path.basename(directory) === 'assets' && entry.name.startsWith('diagnose-')) ||
+        // DevTools issue-description sources: UI text, and the longest file
+        // names in the tree.
+        (entry.name === 'descriptions' && path.basename(directory) === 'issues_manager')
       if (buildOnly) {
         await rm(entryPath, { recursive: true, force: true })
         removed += 1

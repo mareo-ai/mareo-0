@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 const resourcesDirectory = path.resolve(process.argv[2] ?? '.staging')
 const targetPlatform = argument('--platform') ?? process.platform
 const targetArch = argument('--arch') ?? process.arch
-const dshRuntimeRoot = await realpath(path.join(resourcesDirectory, 'dsh-runtime'))
+const dshRuntimeRoot = await realpath(path.join(resourcesDirectory, 'rt'))
 const nodeExecutable = path.join(
   resourcesDirectory,
   'node-runtime',

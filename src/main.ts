@@ -272,7 +272,7 @@ async function startMareo(): Promise<void> {
       // reachable from any settings page the user can open.
       await applyModelCatalog(dshHome, GATEWAY_URL)
       dshRuntime = await startDshRuntime({
-        runtimeDirectory: path.join(runtimeDirectory, 'dsh-runtime'),
+        runtimeDirectory: path.join(runtimeDirectory, 'rt'),
         nodeExecutable: path.join(runtimeDirectory, 'node-runtime', 'bin', process.platform === 'win32' ? 'node.exe' : 'node'),
         dshHome,
         workingDirectory: app.getPath('home'),
@@ -501,7 +501,7 @@ async function passesMinimumVersion(): Promise<boolean> {
  * Refusing the launch with the version to install is the only useful answer.
  */
 async function passesRuntimeDowngradeCheck(): Promise<boolean> {
-  const dshVersion = await readDshVersion(path.join(runtimeDirectoryPath(), 'dsh-runtime'))
+  const dshVersion = await readDshVersion(path.join(runtimeDirectoryPath(), 'rt'))
   if (dshVersion === undefined) return true
   const current: HarnessStamp = { appVersion: app.getVersion(), dshVersion }
   const newest = await rememberHarness(app.getPath('userData'), current)

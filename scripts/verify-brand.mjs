@@ -7,7 +7,7 @@ import { startDshRuntime } from '../dist/src/dsh-runtime.js'
 const resources = path.resolve(process.argv[2] ?? '.staging')
 const home = await mkdtemp(path.join(tmpdir(), 'mareo-brand-smoke-'))
 const runtime = await startDshRuntime({
-  runtimeDirectory: path.join(resources, 'dsh-runtime'),
+  runtimeDirectory: path.join(resources, 'rt'),
   nodeExecutable: path.join(resources, 'node-runtime/bin/node'),
   dshHome: home, workingDirectory: home, logFile: path.join(home, 'smoke.log'),
   onUnexpectedExit: (message) => { console.error(message); process.exitCode = 1 },
