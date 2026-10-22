@@ -260,10 +260,12 @@ function AccountSection() {
   )
 }
 
-// One status strip shows whether the daily free allowance and Wallet can fund
-// the next request. Neither segment represents a percentage: only the free
-// allowance resets each day, while the Wallet can be topped up or overdrawn.
-// The Account section still shows the actual balance for reconciliation.
+// The quota, in money. Two buckets: today's free allowance, which refills at
+// 00:00 Beijing, and the Mareo Wallet behind it, which does not expire. The
+// gateway sends both as micro-yuan, so the client renders amounts and never
+// sees a token count, a model price or the settlement rate.
+//
+// The visible recharge action and the Account section open the same panel.
 const recharge = {
   open: false,
   listeners: new Set(),
@@ -282,10 +284,11 @@ const quotaRefreshHooks = new Set()
 function refreshQuotaNow() {
   quotaRefreshHooks.forEach((hook) => hook())
 }
-const statusSegmentStyle = {
-  flex: 1, height: 8, borderRadius: 4,
+const meterTrackStyle = {
+  height: 6, borderRadius: 3, overflow: 'hidden',
   background: 'var(--dsw-alias-border-l3, #e4e7ec)',
 }
+const meterFillStyle = { height: '100%', background: 'var(--dsw-alias-accent, #3d6bfe)', borderRadius: 3 }
 
 /** Micro-yuan as the user reads it: two decimals, and a minus in front of a debt. */
 function yuan(micro) {
@@ -320,12 +323,16 @@ function QuotaMeter({ wide }) {
   }, [])
 
   if (!wide || !snapshot || snapshot.quota.visible !== true) return null
-  const freeAvailable = snapshot.free.remainingMicro > 0
-  const walletAvailable = snapshot.wallet.balanceMicro > 0
-  const exhausted = snapshot.quota.exhausted === true
+  const meter = snapshot.quota
+  const free = snapshot.free
+  const exhausted = meter.exhausted === true
+  const freeRemainingPercent = free.limitMicro > 0
+    ? Math.min(100, Math.max(0, Math.round((free.remainingMicro / free.limitMicro) * 100)))
+    : 0
 
   return React.createElement('button', {
     type: 'button',
+    'aria-label': '查看额度并充值 Mareo 余额',
     onClick: () => recharge.setOpen(true),
     style: {
       display: 'grid', gap: 10, width: '100%', minWidth: 0, padding: 12,
@@ -334,27 +341,41 @@ function QuotaMeter({ wide }) {
       border: '1px solid var(--dsw-alias-border-l3, #d0d5dd)', borderRadius: 10,
     },
   },
-  React.createElement('span', { style: { fontSize: 14, fontWeight: 600 } },
-    exhausted ? '暂时无法继续使用' : '可以继续使用'),
-  React.createElement('span', { style: { fontSize: 12, opacity: 0.75 } },
-    freeAvailable ? '每日都有免费额度' : '今日免费已用完 · 明日恢复'),
-  React.createElement('span', { style: { display: 'flex', gap: 4 }, 'aria-hidden': true },
-    React.createElement('span', { style: {
-      ...statusSegmentStyle,
-      ...(freeAvailable ? { background: 'var(--dsw-alias-accent, #3d6bfe)' } : {}),
-    } }),
-    React.createElement('span', { style: {
-      ...statusSegmentStyle,
-      ...(walletAvailable ? { background: 'color-mix(in srgb, var(--dsw-alias-accent, #3d6bfe) 55%, var(--dsw-alias-bg-base, #fff))' } : {}),
-    } }),
-  ),
-  React.createElement('span', { style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, opacity: 0.75 } },
-    React.createElement('span', null, '今日免费 · ' + (freeAvailable ? '可用' : '已用完')),
-    React.createElement('span', null, 'Mareo 余额 · ' + (walletAvailable ? '可用' : '暂无')),
+  React.createElement('span', {
+    style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', fontSize: 12 },
+  },
+    React.createElement('span', { style: { opacity: 0.75 } }, '今日免费剩余'),
+    React.createElement('span', { style: { whiteSpace: 'nowrap', fontWeight: 600 } },
+      yuan(free.remainingMicro) + ' / ' + yuan(free.limitMicro)),
   ),
   React.createElement('span', {
-    style: { fontSize: 12, color: 'var(--dsw-alias-accent, #3d6bfe)', fontWeight: 600 },
-  }, exhausted ? '充值后继续 →' : '充值余额 →'))
+    style: { ...meterTrackStyle, display: 'block' }, role: 'progressbar',
+    'aria-label': '今日免费额度剩余',
+    'aria-valuenow': freeRemainingPercent, 'aria-valuemin': 0, 'aria-valuemax': 100,
+  },
+    React.createElement('span', { style: { ...meterFillStyle, display: 'block', width: freeRemainingPercent + '%' } })),
+  React.createElement('span', {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  },
+    React.createElement('span', { style: { fontSize: 12, opacity: 0.75 } }, 'Mareo 余额'),
+    React.createElement('span', { style: { fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap' } },
+      yuan(snapshot.wallet.balanceMicro)),
+  ),
+  React.createElement('span', {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12 },
+  },
+    React.createElement('span', { style: { opacity: 0.65 } }, '可用合计 ' + yuan(snapshot.total.remainingMicro)),
+    React.createElement('span', {
+      style: { color: 'var(--dsw-alias-accent, #3d6bfe)', fontWeight: 600, whiteSpace: 'nowrap' },
+    }, '充值余额 →'),
+  ),
+  exhausted
+    ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-accent, #3d6bfe)' } },
+      '额度已用完 · 充值后继续使用')
+    : null,
+  exhausted
+    ? React.createElement('span', { style: { fontSize: 12, opacity: 0.65 } }, '免费额度北京时间 0 点后恢复。')
+    : null)
 }
 
 
