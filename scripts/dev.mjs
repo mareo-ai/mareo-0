@@ -33,6 +33,20 @@ const devDataDirectory = process.env.MAREO_USER_DATA ?? path.join(projectDirecto
 console.log(`[brand] 开发数据目录：${devDataDirectory}（与发行版隔离）`)
 console.log('[brand] 改 brand/ 下的文件会自动同步，然后在窗口里按 ⌘R\n')
 
+// The sign-in screen reports an unreachable gateway, which looks like a broken
+// build rather than a gateway that was never started. Say it up front.
+const gatewayUrl = process.env.MAREO_GATEWAY_URL ?? 'http://127.0.0.1:3000'
+const reachable = await fetch(`${gatewayUrl.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(2000) })
+  .then((response) => response.ok)
+  .catch(() => false)
+if (!reachable) {
+  console.warn(`[brand] 网关 ${gatewayUrl} 连不上，登录会失败。二选一：`)
+  console.warn('[brand]   · 用生产网关：MAREO_GATEWAY_URL=https://api.svc.mareo.cn npm run dev')
+  console.warn('[brand]   · 起本地网关：cd server && cp .env.example .env 填 DEEPSEEK_API_KEY，然后 npm start\n')
+} else {
+  console.log(`[brand] 网关 ${gatewayUrl} 可达\n`)
+}
+
 const forge = spawn('npx', ['electron-forge', 'start'], {
   cwd: projectDirectory,
   stdio: 'inherit',
