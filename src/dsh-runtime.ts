@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { createWriteStream, type WriteStream } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { get } from 'node:http'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -19,6 +19,24 @@ const STARTUP_TIMEOUT_MS = 90_000
 const SHUTDOWN_TIMEOUT_MS = 5_000
 /** A missed startup budget is intermittent, so one silent retry is worth it. */
 const STARTUP_ATTEMPTS = 2
+
+/**
+ * Engine output is kept across launches so a decision from the previous run —
+ * a compaction, a provider error — is still readable after a restart. It is
+ * capped, and one previous generation is kept, so a machine that runs for weeks
+ * cannot fill the disk with logs.
+ */
+export const ENGINE_LOG_MAX_BYTES = 4 * 1024 * 1024
+
+/**
+ * Moves an oversized engine log aside before the next launch appends to it.
+ * Renaming keeps the old bytes readable instead of deleting the evidence.
+ */
+export async function rotateEngineLog(file: string, maxBytes = ENGINE_LOG_MAX_BYTES): Promise<void> {
+  const size = await stat(file).then((info) => info.size).catch(() => 0)
+  if (size < maxBytes) return
+  await rename(file, `${file}.1`).catch(() => undefined)
+}
 
 export interface DshRuntime {
   url: string
@@ -125,13 +143,17 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
     { insert: [{ id: 'mareo-brand', name: pathToFileURL(path.join(options.runtimeDirectory, 'node_modules', 'mareo-brand', 'index.js')).href }] },
   ]))
   await mkdir(path.dirname(options.logFile), { recursive: true })
+  await rotateEngineLog(options.logFile)
 
   const launch: DshLaunch = {
     dshBinPath: path.join(packageDirectory, packageJson.bin.dsh),
     brandPatch,
     startupTimeoutMs: options.startupTimeoutMs ?? STARTUP_TIMEOUT_MS,
-    log: createWriteStream(options.logFile, { flags: 'w' }),
+    // Appended, not truncated: the previous run's compaction and provider
+    // decisions are what make a cost question answerable after a restart.
+    log: createWriteStream(options.logFile, { flags: 'a' }),
   }
+  launch.log.write(`\n=== Mareo launch ${new Date().toISOString()} ===\n`)
 
   let lastError: unknown
   for (let attempt = 1; attempt <= STARTUP_ATTEMPTS; attempt += 1) {

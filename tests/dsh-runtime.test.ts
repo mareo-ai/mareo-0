@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { extractDshUrl, reportableErrorOutput, startDshRuntime, type DshRuntime } from '../src/dsh-runtime.js'
+import { extractDshUrl, reportableErrorOutput, rotateEngineLog, startDshRuntime, type DshRuntime } from '../src/dsh-runtime.js'
 
 test('extracts the authenticated loopback URL reported by DSH', () => {
   assert.equal(
@@ -197,5 +197,31 @@ test('does not retry an engine that exits during startup', async () => {
     assert.equal(readFileSync(runtime.markerFile, 'utf8'), '1')
   } finally {
     runtime.cleanup()
+  }
+})
+
+test('an oversized engine log is rotated aside, not deleted', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-log-'))
+  const file = path.join(directory, 'mareo.log')
+  writeFileSync(file, 'x'.repeat(64))
+  try {
+    await rotateEngineLog(file, 32)
+    assert.equal(readFileSync(`${file}.1`, 'utf8').length, 64, '旧内容应保留到 .1')
+    assert.equal(existsSync(file), false, '原文件应被移走，下一次写入从头追加')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a log under the cap is left in place', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-log-'))
+  const file = path.join(directory, 'mareo.log')
+  writeFileSync(file, 'small')
+  try {
+    await rotateEngineLog(file, 1024)
+    assert.equal(readFileSync(file, 'utf8'), 'small')
+    assert.equal(existsSync(`${file}.1`), false)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })
