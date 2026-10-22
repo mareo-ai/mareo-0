@@ -83,6 +83,10 @@ spctl -a -t exec -vv "$APP"            # 期望: accepted, source=Notarized Deve
 
 **CI 需要的三个 secret**：`SSLTRUS_ACCESS_KEY`、`SSLTRUS_ACCESS_SECRET`、`SSLTRUS_CERT_CODE`。前两个建议用**订阅密钥**（控制台 → 代码签名证书 → 详情 → 安全 → Access Key → 创建凭证，权限只覆盖这一张证书）。
 
+**证书编号（Cert Code）是什么**：锐成控制台「代码签名证书 → 详情」里的**证书ID**，形如 `cert-2080243108359966720`，
+**带 `cert-` 前缀**、整串照抄。它不是订阅ID（`261008…`）、不是 CA 订单号、也不是证书指纹。
+`scripts/sign-windows.cjs` 原样传给 CLI 的 `--cert-code`，不做任何拼接，所以前缀不能省。
+
 **证书编号（Cert Code）怎么拿**：`SSLTRUS_CERT_CODE` 就是他们 CLI 的 `--cert-code`，指"用哪张证书签名"。权威拿法是配置好 AK/SK 后跑一次：
 
 ```sh
@@ -96,6 +100,7 @@ signtool quota --json      # 输出里含"证书编号"与剩余次数
 
 | 现象 | 原因/处理 |
 |---|---|
+| `signtool quota` 报 `unrecognized option: quota` / `SEC_ERROR_BAD_DATABASE` | 跑的是 **Homebrew 的 Mozilla signtool**（`/opt/homebrew/bin/signtool`），不是锐安信的 CLI。先按下载页装锐安信客户端；两者的命令完全不通 |
 | 构建报 `Windows signing needs ACCESS_KEY…` | 三个 secret 没配齐；release 构建**必须**有签名，不要改成"跳过" |
 | `status = UnknownError` 或仍提示"文件已被修改" | 打包后的 exe 带着失效的旧签名；hook 已用 `--nest=false` 先清掉再签，若仍复现检查该参数 |
 | 签名次数不够 | 在控制台查额度；我们每次构建只消耗 2 次左右 |

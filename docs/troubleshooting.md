@@ -43,6 +43,29 @@ find .staging/dsh-runtime -name '*.d.*' | wc -l     # 类型声明，运行时�
 bash -c 'ulimit -n 65536; npx electron-forge package --arch=arm64'
 ```
 
+### 忘了 Windows 签名证书编号是什么
+
+**根因**：`SSLTRUS_CERT_CODE` 存在 GitHub Secrets 里，而 **secret 只能写不能读**——
+API 只返回名字和更新时间，CI 日志里它被自动替换成 `***`，会话记录里也从未留存过值（当时是直接
+在控制台取到后填进 GitHub 的）。
+
+**怎么确认**：锐成控制台「代码签名证书 → 详情」→ **证书ID**，形如 `cert-2080243108359966720`（带前缀，整串照抄）。
+看到 `订阅ID`、`CA 订单号`、`证书指纹` 都不是它。
+
+**修法**：`gh secret set SSLTRUS_CERT_CODE --body "cert-..."`。
+
+> 若现有 secret 已经能签成功（构建日志里配额真的减少了），就**不要重置**——能签成功说明格式本来是对的。
+
+### `signtool quota` 报 `unrecognized option: quota` 或 `SEC_ERROR_BAD_DATABASE`
+
+**根因**：跑的是 Homebrew 的 **Mozilla NSS signtool**（`/opt/homebrew/bin/signtool`），
+子命令只有 `sign`/`verify`，没有 `quota`；`SEC_ERROR_BAD_DATABASE` 是 NSS 证书库的报错。锐安信 CLI 是另一个程序。
+
+**怎么确认**：`which -a signtool` 看解析到哪个；锐安信客户端从
+<https://pccs.ssltrus.cn/oss-code-sign-client/index.html> 安装，不在 Homebrew 里。
+
+**修法**：装锐安信 CLI，或干脆不查——证书编号在锐成控制台详情页就有。
+
 ### `gh workflow run` 返回 404，但仓库和 workflow 都在
 
 **根因**：`gh` 的 token 缺 `workflow` scope。它不会报权限错误，只会静默 404。
