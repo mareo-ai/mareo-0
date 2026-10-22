@@ -265,9 +265,7 @@ function AccountSection() {
 // gateway sends both as micro-yuan, so the client renders amounts and never
 // sees a token count, a model price or the settlement rate.
 //
-// Running out is the moment a top-up is most wanted, so that notice is the
-// primary way into the recharge panel; the meter itself and the Account section
-// open the same panel.
+// The visible recharge action and the Account section open the same panel.
 const recharge = {
   open: false,
   listeners: new Set(),
@@ -328,51 +326,55 @@ function QuotaMeter({ wide }) {
   const meter = snapshot.quota
   const free = snapshot.free
   const exhausted = meter.exhausted === true
-  const freeUsedPercent = free.limitMicro > 0
-    ? Math.min(100, Math.round((free.usedMicro / free.limitMicro) * 100))
-    : 100
+  const freeRemainingPercent = free.limitMicro > 0
+    ? Math.min(100, Math.max(0, Math.round((free.remainingMicro / free.limitMicro) * 100)))
+    : 0
 
-  return React.createElement('div', {
-    style: { display: 'grid', gap: 6, width: '100%', minWidth: 0, padding: '8px 2px 2px', cursor: 'pointer' },
-    title: '点击充值 Mareo 余额',
+  return React.createElement('button', {
+    type: 'button',
+    'aria-label': '查看额度并充值 Mareo 余额',
     onClick: () => recharge.setOpen(true),
+    style: {
+      display: 'grid', gap: 10, width: '100%', minWidth: 0, padding: 12,
+      textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer',
+      background: 'var(--dsw-alias-bg-base, #fff)',
+      border: '1px solid var(--dsw-alias-border-l3, #d0d5dd)', borderRadius: 10,
+    },
   },
-  React.createElement('div', {
-    style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, lineHeight: '16px' },
+  React.createElement('span', {
+    style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', fontSize: 12 },
   },
-    React.createElement('span', { style: { opacity: 0.75 } }, '今日免费'),
-    React.createElement('span', { style: { opacity: 0.75, whiteSpace: 'nowrap' } },
+    React.createElement('span', { style: { opacity: 0.75 } }, '今日免费剩余'),
+    React.createElement('span', { style: { whiteSpace: 'nowrap', fontWeight: 600 } },
       yuan(free.remainingMicro) + ' / ' + yuan(free.limitMicro)),
   ),
-  React.createElement('div', {
-    style: meterTrackStyle, role: 'progressbar',
-    'aria-valuenow': freeUsedPercent, 'aria-valuemin': 0, 'aria-valuemax': 100,
+  React.createElement('span', {
+    style: { ...meterTrackStyle, display: 'block' }, role: 'progressbar',
+    'aria-label': '今日免费额度剩余',
+    'aria-valuenow': freeRemainingPercent, 'aria-valuemin': 0, 'aria-valuemax': 100,
   },
-    React.createElement('div', { style: { ...meterFillStyle, width: Math.max(2, freeUsedPercent) + '%' } })),
-  React.createElement('div', {
-    style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, lineHeight: '16px' },
+    React.createElement('span', { style: { ...meterFillStyle, display: 'block', width: freeRemainingPercent + '%' } })),
+  React.createElement('span', {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   },
-    React.createElement('span', { style: { opacity: 0.75 } }, 'Mareo 余额'),
-    React.createElement('span', { style: { fontWeight: 500, whiteSpace: 'nowrap' } }, yuan(snapshot.wallet.balanceMicro)),
+    React.createElement('span', { style: { fontSize: 12, opacity: 0.75 } }, 'Mareo 余额'),
+    React.createElement('span', { style: { fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap' } },
+      yuan(snapshot.wallet.balanceMicro)),
   ),
-  React.createElement('div', {
-    style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, lineHeight: '16px', opacity: 0.6 },
+  React.createElement('span', {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12 },
   },
-    React.createElement('span', null, '可用合计'),
-    React.createElement('span', { style: { whiteSpace: 'nowrap' } }, yuan(snapshot.total.remainingMicro)),
+    React.createElement('span', { style: { opacity: 0.65 } }, '可用合计 ' + yuan(snapshot.total.remainingMicro)),
+    React.createElement('span', {
+      style: { color: 'var(--dsw-alias-accent, #3d6bfe)', fontWeight: 600, whiteSpace: 'nowrap' },
+    }, '充值余额 →'),
   ),
   exhausted
-    ? React.createElement('button', {
-      type: 'button',
-      style: {
-        fontSize: 12, lineHeight: '18px', textAlign: 'left', padding: 0, border: 'none',
-        background: 'transparent', color: 'var(--dsw-alias-accent, #3d6bfe)', cursor: 'pointer',
-      },
-      onClick: () => recharge.setOpen(true),
-    }, '额度已用完 · 去充值')
+    ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-accent, #3d6bfe)' } },
+      '额度已用完 · 充值后继续使用')
     : null,
   exhausted
-    ? React.createElement('span', { style: { fontSize: 12, opacity: 0.6 } }, '免费额度北京时间 0 点后恢复。')
+    ? React.createElement('span', { style: { fontSize: 12, opacity: 0.65 } }, '免费额度北京时间 0 点后恢复。')
     : null)
 }
 
@@ -382,20 +384,24 @@ function QuotaMeter({ wide }) {
 // anything — it sends a tier id and shows what the gateway answers — and the
 // polling stops as soon as the panel closes, so walking away costs nothing.
 const panelCardStyle = {
-  width: 340, maxWidth: '90vw', background: 'var(--dsw-alias-bg-base, #fff)', borderRadius: 12,
-  padding: '20px 20px 16px', boxShadow: '0 12px 48px rgba(0,0,0,0.18)', display: 'grid', gap: 12,
+  boxSizing: 'border-box', width: 380, maxWidth: 'calc(100vw - 32px)',
+  background: 'var(--dsw-alias-bg-base, #fff)', color: 'inherit', borderRadius: 14,
+  padding: 24, boxShadow: '0 16px 48px rgba(0,0,0,0.18)', display: 'grid', gap: 20,
 }
 const tierButtonStyle = {
-  flex: 1, padding: '10px 0', borderRadius: 8, cursor: 'pointer', fontSize: 14,
+  flex: 1, minWidth: 0, padding: '12px 0', borderRadius: 8, cursor: 'pointer',
+  font: 'inherit', fontSize: 14, color: 'inherit',
   border: '1px solid var(--dsw-alias-border, #d0d5dd)', background: 'transparent',
 }
 const chosenTierStyle = {
   ...tierButtonStyle, borderColor: 'var(--dsw-alias-accent, #3d6bfe)',
-  color: 'var(--dsw-alias-accent, #3d6bfe)', fontWeight: 600,
+  color: 'var(--dsw-alias-accent, #3d6bfe)',
+  background: 'color-mix(in srgb, var(--dsw-alias-accent, #3d6bfe) 7%, var(--dsw-alias-bg-base, #fff))',
+  fontWeight: 600,
 }
 const primaryButtonStyle = {
-  width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-  fontSize: 14, background: 'var(--dsw-alias-accent, #3d6bfe)', color: '#fff',
+  width: '100%', padding: '11px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+  font: 'inherit', fontSize: 14, fontWeight: 600, background: 'var(--dsw-alias-accent, #3d6bfe)', color: '#fff',
 }
 
 function RechargePanel() {
@@ -488,59 +494,78 @@ function RechargePanel() {
     },
     onClick: (event) => { if (event.target === event.currentTarget) close() },
   },
-  React.createElement('div', { style: panelCardStyle },
+  React.createElement('div', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'mareo-recharge-title', style: panelCardStyle },
     React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-      React.createElement('strong', { style: { fontSize: 15 } }, '充值 Mareo 余额'),
+      React.createElement('strong', { id: 'mareo-recharge-title', style: { fontSize: 17 } }, '充值 Mareo 余额'),
       React.createElement('button', {
-        type: 'button',
-        style: { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 15, opacity: 0.6 },
+        type: 'button', 'aria-label': '关闭充值',
+        style: { border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 18, opacity: 0.65 },
         onClick: close,
       }, '\u2715'),
     ),
 
     phase === 'choose'
-      ? React.createElement('div', { style: { display: 'grid', gap: 12 } },
-        React.createElement('div', { style: { display: 'flex', gap: 8 } },
-          ...tiers.map((entry) => React.createElement('button', {
-            key: entry.tier,
-            type: 'button',
-            style: entry.tier === tier ? chosenTierStyle : tierButtonStyle,
-            onClick: () => setTier(entry.tier),
-          }, yuan(entry.amountMicro)))),
+      ? React.createElement('div', { style: { display: 'grid', gap: 18 } },
+        React.createElement('div', { style: { display: 'grid', gap: 8 } },
+          React.createElement('span', { style: { fontSize: 13, fontWeight: 600 } }, '选择充值金额'),
+          React.createElement('div', { style: { display: 'flex', gap: 8 } },
+            ...tiers.map((entry) => React.createElement('button', {
+              key: entry.tier,
+              type: 'button',
+              'aria-pressed': entry.tier === tier,
+              style: entry.tier === tier ? chosenTierStyle : tierButtonStyle,
+              onClick: () => setTier(entry.tier),
+            }, yuan(entry.amountMicro), entry.tier === tier ? ' ✓' : '')))),
         channel === null
           ? null
-          : React.createElement('div', { style: { display: 'flex', gap: 8 } },
-            ...(config?.channels ?? []).map((id) => React.createElement('button', {
-              key: id,
-              type: 'button',
-              style: id === channel ? chosenTierStyle : tierButtonStyle,
-              onClick: () => setChannel(id),
-            }, id === 'alipay' ? '支付宝' : '微信支付'))),
+          : React.createElement('div', { style: { display: 'grid', gap: 8 } },
+            React.createElement('span', { style: { fontSize: 13, fontWeight: 600 } }, '支付方式'),
+            config?.channels.length === 1
+              ? React.createElement('span', { style: { fontSize: 13, opacity: 0.8 } },
+                channel === 'alipay' ? '支付宝' : '微信支付')
+              : React.createElement('div', { style: { display: 'flex', gap: 8 } },
+                ...(config?.channels ?? []).map((id) => React.createElement('button', {
+                  key: id,
+                  type: 'button',
+                  'aria-pressed': id === channel,
+                  style: id === channel ? chosenTierStyle : tierButtonStyle,
+                  onClick: () => setChannel(id),
+                }, id === 'alipay' ? '支付宝' : '微信支付')))),
         React.createElement('button', {
           type: 'button', disabled: busy || channel === null || tiers.length === 0, style: primaryButtonStyle, onClick: start,
-        }, busy ? '正在发起…' : '去支付'),
-        notice ? React.createElement('div', { style: { fontSize: 12, opacity: 0.8 } }, notice) : null,
-        React.createElement('div', { style: { fontSize: 12, opacity: 0.6, lineHeight: 1.7 } },
+        }, busy ? '正在发起…' : channel === null ? '选择支付方式' :
+          '使用' + (channel === 'alipay' ? '支付宝' : '微信') + '支付 ' + amountOf(tier)),
+        notice ? React.createElement('div', { role: 'alert', style: { fontSize: 12, color: 'var(--dsw-alias-accent, #3d6bfe)' } }, notice) : null,
+        React.createElement('div', { style: { fontSize: 12, opacity: 0.65, lineHeight: 1.7 } },
           '先扣今日免费额度，用完再扣余额；余额长期有效。'),
       )
       : null,
 
     phase === 'pay' && order
-      ? React.createElement('div', { style: { display: 'grid', gap: 10, justifyItems: 'center' } },
-        React.createElement('div', { style: { fontSize: 13, opacity: 0.8 } },
+      ? React.createElement('div', { style: { display: 'grid', gap: 14, justifyItems: 'center', textAlign: 'center' } },
+        React.createElement('div', { style: { fontSize: 13 } },
           '请用' + (order.channel === 'alipay' ? '支付宝' : '微信') + '扫码支付'),
-        // The gateway rendered this QR code; the client never builds one.
+        React.createElement('div', { style: { fontSize: 24, fontWeight: 600 } }, yuan(order.amountMicro)),
+        // The gateway renders a 240px SVG. Give it its own quiet zone; never overlay the amount on the code.
         React.createElement('div', {
-          style: { width: 220, height: 220 },
+          style: {
+            boxSizing: 'border-box', width: 266, maxWidth: '100%', minHeight: 266,
+            padding: 12, background: '#fff', border: '1px solid var(--dsw-alias-border-l3, #d0d5dd)',
+            borderRadius: 10, lineHeight: 0, overflow: 'hidden',
+          },
           dangerouslySetInnerHTML: { __html: order.qrSvg || '' },
         }),
-        React.createElement('div', { style: { fontSize: 14, fontWeight: 600 } }, amountOf(order.amountMicro ? tier : tier)),
-        React.createElement('div', { style: { fontSize: 12, opacity: 0.6 } }, '剩余 ' + clock),
-        React.createElement('div', { style: { fontSize: 12, opacity: 0.8 } }, '\u23f3 等待支付…'),
+        React.createElement('div', { role: 'status', style: { fontSize: 13, opacity: 0.8 } }, '等待支付确认…'),
+        React.createElement('div', { style: { fontSize: 12, opacity: 0.65 } }, '二维码剩余有效时间 ' + clock),
         React.createElement('button', {
-          type: 'button', style: { ...primaryButtonStyle, background: 'transparent', color: 'var(--dsw-alias-accent, #3d6bfe)', border: '1px solid var(--dsw-alias-border, #d0d5dd)', width: 'auto', padding: '6px 16px' },
+          type: 'button', disabled: busy,
+          style: {
+            padding: '4px 8px', border: 'none', background: 'transparent', cursor: 'pointer',
+            font: 'inherit', fontSize: 12, color: 'var(--dsw-alias-accent, #3d6bfe)',
+          },
           onClick: start,
         }, '重新生成'),
+        notice ? React.createElement('div', { role: 'alert', style: { fontSize: 12 } }, notice) : null,
       )
       : null,
 

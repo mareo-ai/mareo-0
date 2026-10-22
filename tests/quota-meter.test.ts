@@ -114,13 +114,17 @@ test('the meter shows both buckets in yuan and nothing else', async () => {
   const node = await meterHarness(full()).render()
   assert.ok(node !== null)
   const text = JSON.stringify(node)
-  assert.match(text, /今日免费/)
+  assert.match(text, /今日免费剩余/)
   assert.match(text, /¥3\.80 \/ ¥10\.00/)
   assert.match(text, /Mareo 余额/)
   assert.match(text, /¥23\.50/)
   assert.match(text, /可用合计/)
   assert.match(text, /¥27\.30/)
+  assert.match(text, /充值余额 →/)
+  assert.equal(node.tag, 'button', 'the whole card is a keyboard-accessible recharge action')
+  assert.equal(typeof (node.props as { onClick?: unknown }).onClick, 'function')
   assert.match(text, /progressbar/)
+  assert.match(text, /"aria-valuenow":38/, 'the bar represents the remaining free allowance')
   // Micro-yuan stops at the gateway: every amount on screen is in yuan.
   assert.doesNotMatch(text, /[0-9]{7}/)
   assert.doesNotMatch(text, /已用 62%/, 'the percentage is replaced by the amount')
@@ -138,9 +142,9 @@ test('an exhausted account is told it is out and offered a top-up', async () => 
     }),
   )
   const text = JSON.stringify(await harness.render())
-  assert.match(text, /额度已用完 · 去充值/)
+  assert.match(text, /额度已用完 · 充值后继续使用/)
   assert.match(text, /免费额度北京时间 0 点后恢复/)
-  // Running out is where a top-up is most wanted, so it is the primary entry.
+  assert.match(text, /充值余额 →/)
   assert.match(text, /"tag":"button"/)
   // No task, no ad, no simulated earning: the only way on is paying.
   assert.doesNotMatch(text, /模拟/)
