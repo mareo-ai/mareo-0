@@ -56,6 +56,16 @@ if (options.checkNodeRuntime) {
   // file descriptors (EMFILE) for nothing at runtime.
   const prunedTypes = await pruneTypeDeclarations(path.join(dshStagingDirectory, 'node_modules'))
   console.log(`Pruned ${prunedTypes.toLocaleString()} type declaration files from the staged runtime.`)
+  // Native packages for other platforms cannot load here, and they are large:
+  // the LibreOffice kit alone ships a full office suite per platform/arch.
+  const prunedPlatforms = await pruneForeignPlatformPackages(
+    path.join(dshStagingDirectory, 'node_modules'),
+    targetPlatform,
+    targetArch,
+  )
+  if (prunedPlatforms > 0) {
+    console.log(`Pruned ${prunedPlatforms} package(s) built for another platform.`)
+  }
   // Ship our own package alongside npm dependencies; leave all DSH packages intact.
   const brandDirectory = path.join(dshStagingDirectory, 'node_modules', 'mareo-brand')
   await mkdir(brandDirectory, { recursive: true })
@@ -68,6 +78,40 @@ if (options.checkNodeRuntime) {
     `window.__ModuleLoader__.load({ id: 'mareo-brand', factory: (require) => {\nconst exports = {};\nconst logoUrl = ${JSON.stringify(logoUrl)};\n${brandClient}\nreturn exports;\n} });\n`)
   await stageNodeRuntime(nodeRuntime, nodeStagingDirectory)
   await run(process.execPath, [path.join(projectDirectory, 'scripts', 'verify-runtime.mjs'), stagingRoot, '--platform', targetPlatform, '--arch', targetArch], projectDirectory)
+}
+
+/**
+ * Removes native packages named for a different platform/arch, returning how many
+ * were removed. The suffix is npm's convention for prebuilt binaries
+ * (`sharp-darwin-arm64`, `libreoffice-kit-win32-x64`); a package whose name has no
+ * such suffix is left alone, because it may be a cross-platform shim that the
+ * code loads on every host.
+ */
+async function pruneForeignPlatformPackages(rootDirectory, platform, arch) {
+  const foreign = /-(darwin|win32|linux)-(arm64|x64|ia32|universal)$/
+  let removed = 0
+  const pending = [rootDirectory]
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    let entries
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const entryPath = path.join(directory, entry.name)
+      const match = foreign.exec(entry.name)
+      if (match !== null && (match[1] !== platform || match[2] !== arch)) {
+        await rm(entryPath, { recursive: true, force: true })
+        removed += 1
+        continue
+      }
+      pending.push(entryPath)
+    }
+  }
+  return removed
 }
 
 /**

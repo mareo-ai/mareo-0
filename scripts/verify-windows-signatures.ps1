@@ -4,10 +4,11 @@
 # this step is what turns a failed signature into a failed build.
 $ErrorActionPreference = 'Stop'
 
-$appDirectory = 'out/Mareo-win32-x64'
+$outDirectory = if ($env:MAREO_OUT_DIR) { $env:MAREO_OUT_DIR } else { 'out' }
+$appDirectory = Join-Path $outDirectory 'Mareo-win32-x64'
 $targets = @(
-  "$appDirectory/Mareo.exe",
-  'out/make/squirrel.windows/x64/MareoSetup.exe'
+  (Join-Path $appDirectory 'Mareo.exe'),
+  (Join-Path $outDirectory 'make/squirrel.windows/x64/MareoSetup.exe')
 )
 
 # The code-signing certificate in use (SHA-1 thumbprint). A renewal issues a new

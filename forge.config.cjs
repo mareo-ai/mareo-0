@@ -39,6 +39,10 @@ if (targetPlatform === "win32") {
 
 /** @type {import('@electron-forge/shared-types').ForgeConfig} */
 module.exports = {
+  // Squirrel unpacks the app again under this directory, and Windows stops at
+  // 260 characters. The runtime's deepest file is already 186 characters, so the
+  // Windows job points this at a short root (C:\m) instead of the checkout path.
+  outDir: process.env.MAREO_OUT_DIR ?? "out",
   packagerConfig: {
     name: "Mareo",
     icon: targetPlatform === "win32"
