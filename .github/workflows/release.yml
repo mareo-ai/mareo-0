@@ -101,6 +101,12 @@ jobs:
     needs: version
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # Squirrel unpacks the app under the output directory, and Windows refuses
+      # paths past 260 characters. The checkout path plus out/make/squirrel...
+      # lands at 264; a two-character root leaves room for the runtime's deepest
+      # file (186 characters on its own).
+      MAREO_OUT_DIR: C:\m
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -128,9 +134,9 @@ jobs:
         with:
           name: windows-installer
           path: |
-            out/make/squirrel.windows/x64/*.exe
-            out/make/squirrel.windows/x64/*.nupkg
-            out/make/squirrel.windows/x64/RELEASES
+            ${{ env.MAREO_OUT_DIR }}/make/squirrel.windows/x64/*.exe
+            ${{ env.MAREO_OUT_DIR }}/make/squirrel.windows/x64/*.nupkg
+            ${{ env.MAREO_OUT_DIR }}/make/squirrel.windows/x64/RELEASES
           if-no-files-found: error
 
   publish:
