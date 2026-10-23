@@ -38,6 +38,19 @@ export interface Settings {
   settlementRate: number
   /** Per-model markup overrides, keyed by a name the price table knows. */
   modelRates: Map<string, number>
+  /**
+   * The daily free allowance shrinks as an account consumes it over its whole
+   * life: heavy users fall to the floor quickly, occasional users keep the top
+   * allowance for months. Sorted by `atMicro` ascending.
+   */
+  freeTiers: FreeTier[]
+}
+
+export interface FreeTier {
+  /** Lifetime free-allowance consumption (micro-yuan) at which this tier applies. */
+  atMicro: number
+  /** The whole day's allowance once this tier applies. */
+  allowanceMicro: number
 }
 
 /** 1.3 charges the user 30% above what the model call really cost us. */
@@ -46,6 +59,8 @@ export const DEFAULT_SETTLEMENT_RATE = 1.3
 const SETTING_DEFAULTS: Record<string, string> = {
   'quota.mode': 'off',
   'quota.dailyFreeMicro': '10000000',
+  // ¥30 -> ¥6, ¥60 -> ¥4, ¥100 -> ¥3. All micro-yuan: 1 元 = 1,000,000.
+  'quota.freeTiers': '30000000:6000000,60000000:4000000,100000000:3000000',
   'quota.rewardAmountMicro': '1000000',
   'quota.dailyRewardCapMicro': '3000000',
   'quota.rewardMinSeconds': '15',
@@ -59,7 +74,8 @@ const SETTING_DEFAULTS: Record<string, string> = {
 /** What an operator may set, with the reason it exists. Used by the CLI's help. */
 export const SETTING_KEYS: { key: string; meaning: string }[] = [
   { key: 'quota.mode', meaning: 'off | shadow | enforce（shadow 只统计不拦截）' },
-  { key: 'quota.dailyFreeMicro', meaning: '每日免费额度，微元（1 元 = 1000000）' },
+  { key: 'quota.dailyFreeMicro', meaning: '每日免费额度（累计消耗未达任何档位时），微元（1 元 = 1000000）' },
+  { key: 'quota.freeTiers', meaning: '按累计消耗分档：累计:额度,累计:额度，微元，逗号分隔，升序' },
   { key: 'quota.rewardAmountMicro', meaning: '单次任务入账额度，微元' },
   { key: 'quota.dailyRewardCapMicro', meaning: '每日任务入账上限，微元' },
   { key: 'quota.rewardMinSeconds', meaning: '任务最短完成时长（秒）' },
@@ -108,6 +124,25 @@ export function parseModelRates(raw: string | undefined): Map<string, number> {
   return rates
 }
 
+/**
+ * Parses `累计:额度,累计:额度` into ascending tiers. A malformed entry is dropped
+ * rather than guessed at, and `validateSetting` refuses to store one at all, so
+ * an operator cannot silently shift the allowance of every account.
+ */
+export function parseFreeTiers(raw: string | undefined): FreeTier[] {
+  const tiers: FreeTier[] = []
+  for (const entry of (raw ?? '').split(',')) {
+    const [at, allowance] = entry.split(':').map((part) => part.trim())
+    if (at === undefined || allowance === undefined) continue
+    const atMicro = Number(at)
+    const allowanceMicro = Number(allowance)
+    if (!Number.isInteger(atMicro) || atMicro <= 0) continue
+    if (!Number.isInteger(allowanceMicro) || allowanceMicro < 0) continue
+    tiers.push({ atMicro, allowanceMicro })
+  }
+  return tiers.sort((left, right) => left.atMicro - right.atMicro)
+}
+
 export function readSettings(db: GatewayDatabase): Settings {
   const stored = readRawSettings(db)
   const value = (key: string): string | undefined => stored.get(key) ?? SETTING_DEFAULTS[key]
@@ -126,6 +161,7 @@ export function readSettings(db: GatewayDatabase): Settings {
     rewardProvider: (value('quota.rewardProvider') ?? 'fake-ad').trim() || 'fake-ad',
     settlementRate: positiveRate(value('billing.settlementRate'), DEFAULT_SETTLEMENT_RATE),
     modelRates: parseModelRates(value('billing.modelRates')),
+    freeTiers: parseFreeTiers(value('quota.freeTiers')),
   }
 }
 
@@ -154,6 +190,17 @@ function validateSetting(key: string, raw: string): string {
     if (!/^[\w-]{1,32}$/.test(value)) throw new Error(`任务来源标识格式不对：${raw}`)
   } else if (key === 'billing.settlementRate') {
     if (positiveRate(value, -1) <= 0) throw new Error(`${key} 需要大于 0 的数，收到 ${raw}`)
+  } else if (key === 'quota.freeTiers') {
+    let previous = 0
+    for (const entry of value.split(',').map((part) => part.trim()).filter((part) => part !== '')) {
+      const [at, allowance] = entry.split(':').map((part) => part.trim())
+      const atMicro = Number(at)
+      const allowanceMicro = Number(allowance)
+      if (!Number.isInteger(atMicro) || atMicro <= 0) throw new Error(`${entry} 的累计阈值需要正整数（微元）`)
+      if (!Number.isInteger(allowanceMicro) || allowanceMicro < 0) throw new Error(`${entry} 的额度需要非负整数（微元）`)
+      if (atMicro <= previous) throw new Error('档位阈值必须严格递增')
+      previous = atMicro
+    }
   } else if (key === 'billing.modelRates') {
     const known = knownModels()
     for (const entry of value.split(',').map((part) => part.trim()).filter((part) => part !== '')) {

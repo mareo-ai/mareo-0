@@ -8,9 +8,9 @@ import test from 'node:test'
 import { createTokenAccount, openDatabase, type GatewayDatabase } from '../src/db.js'
 import { recordUsage } from '../src/usage.js'
 import { costOf, settleMicro, type TokenUsage } from '../src/pricing.js'
-import { creditState, freeUsedMicroToday, quotaVisible } from '../src/quota.js'
+import { creditState, dailyAllowanceMicro, freeUsedMicroToday, quotaVisible } from '../src/quota.js'
 import { chargeWallet, grantCredit, walletBalanceMicro } from '../src/wallet.js'
-import { DEFAULT_SETTLEMENT_RATE, parseModelRates, readSettings, settlementRateFor, writeSetting } from '../src/settings.js'
+import { DEFAULT_SETTLEMENT_RATE, parseFreeTiers, parseModelRates, readSettings, settlementRateFor, writeSetting } from '../src/settings.js'
 import { dayStamp, startOfDay } from '../src/clock.js'
 import { quotaImpact, type Row } from '../src/cost-report.js'
 
@@ -245,4 +245,64 @@ test('shadow analysis counts the accounts and requests a threshold would stop', 
   assert.equal(generous.blockedAccounts, 0)
   assert.equal(generous.blockedRequests, 0)
   assert.equal(generous.costBeyondMicro, 0)
+})
+
+test('the daily allowance falls in steps as an account consumes it over its life', () => {
+  const settings = {
+    quotaMode: 'enforce' as const,
+    dailyFreeMicro: 10_000_000,
+    freeTiers: parseFreeTiers('30000000:6000000,60000000:4000000,100000000:3000000'),
+    rewardAmountMicro: 0,
+    dailyRewardCapMicro: 0,
+    rewardMinSeconds: 0,
+    rewardDailyLimit: 0,
+    rewardAccounts: [],
+    rewardProvider: 'fake-ad',
+    settlementRate: 1.3,
+    modelRates: new Map<string, number>(),
+  }
+  // Below the first threshold the full allowance applies.
+  assert.equal(dailyAllowanceMicro(settings, 0), 10_000_000)
+  assert.equal(dailyAllowanceMicro(settings, 29_999_999), 10_000_000)
+  // Each boundary switches the whole day's allowance.
+  assert.equal(dailyAllowanceMicro(settings, 30_000_000), 6_000_000)
+  assert.equal(dailyAllowanceMicro(settings, 59_999_999), 6_000_000)
+  assert.equal(dailyAllowanceMicro(settings, 60_000_000), 4_000_000)
+  assert.equal(dailyAllowanceMicro(settings, 100_000_000), 3_000_000)
+  // The floor holds no matter how much is consumed.
+  assert.equal(dailyAllowanceMicro(settings, 900_000_000), 3_000_000)
+})
+
+test('consumption today does not shrink today\'s allowance, only tomorrow\'s', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-tier-'))
+  const db = openDatabase(path.join(directory, 'gateway.db'))
+  const accountId = createTokenAccount(db, '分档测试')
+  writeSetting(db, 'quota.mode', 'enforce')
+  try {
+    const settings = readSettings(db)
+    // Yesterday's consumption puts the account at ¥29.9: still the top tier.
+    db.prepare(`INSERT INTO usage (userId, ts, model, promptChars, completionChars, status, latencyMs, paidFromFreeMicro, billableMicro)
+      VALUES (?, ?, 'deepseek-flash', 0, 0, 200, 0, ?, ?)`).run(
+      accountId,
+      new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
+      29_900_000,
+      29_900_000,
+    )
+    const before = creditState(db, accountId, settings)
+    assert.equal(before.freeLimitMicro, 10_000_000, '今天的额度仍是 ¥10')
+    // Spending ¥12 today crosses the threshold, but not for today.
+    db.prepare(`INSERT INTO usage (userId, ts, model, promptChars, completionChars, status, latencyMs, paidFromFreeMicro, billableMicro)
+      VALUES (?, ?, 'deepseek-flash', 0, 0, 200, 0, ?, ?)`).run(
+      accountId,
+      new Date().toISOString(),
+      12_000_000,
+      12_000_000,
+    )
+    const after = creditState(db, accountId, settings)
+    assert.equal(after.freeLimitMicro, 10_000_000, '当天跨档不缩水')
+    assert.equal(after.freeRemainingMicro, 0, '当日额度用尽')
+  } finally {
+    db.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
 })

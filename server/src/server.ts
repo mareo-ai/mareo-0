@@ -8,7 +8,7 @@ import { proxyRequest, type ProxyConfig, type ProxyOutcome } from './proxy.js'
 import { parseSessionTitleDetail, recordSessionTitle } from './session-titles.js'
 import { parseSiteView, recordSiteView } from './site-views.js'
 import { startOfDay } from './clock.js'
-import { costOf, fxRate, providerForModel, settleMicro } from './pricing.js'
+import { costOf, fxRate, providerForModel, settleMicro, type Provider } from './pricing.js'
 import { recordUsage, countRequestsSince, type UsageBilling } from './usage.js'
 import { readSponsoredAd, recordAdEvent } from './sponsored-ad.js'
 import { readSettings, settlementRateFor, type Settings } from './settings.js'
@@ -370,6 +370,12 @@ async function handleRequest(
 }
 
 /**
+ * Upstreams the daily free allowance does not cover. One OpenAI request costs
+ * more than a whole day's allowance, so those models are charged to the wallet.
+ */
+const FREE_ALLOWANCE_EXCLUDED: ReadonlySet<Provider> = new Set<Provider>(['openai'])
+
+/**
  * What one finished request cost and what the user is charged for it, with the
  * free allowance covering what it can. Undefined when the provider reported no
  * usage or the model has no price: an unpriced request is recorded as such and
@@ -392,7 +398,11 @@ function billingFor(
     actualMicro,
     billableMicro,
     marginMicro,
-    paidFromFreeMicro: Math.min(Math.max(credit.freeRemainingMicro, 0), billableMicro),
+    // The daily allowance only covers our cheap upstream. One OpenAI request
+    // costs more than a day's allowance, so it is charged to the wallet alone.
+    paidFromFreeMicro: FREE_ALLOWANCE_EXCLUDED.has(provider)
+      ? 0
+      : Math.min(Math.max(credit.freeRemainingMicro, 0), billableMicro),
   }
 }
 
@@ -541,6 +551,7 @@ function quotaPayload(db: GatewayDatabase, accountId: string, settings: Settings
     usedMicro: number
     remainingMicro: number
     resetAt: string
+    coveredProviders: string[]
   }
   wallet: { balanceMicro: number }
   total: { remainingMicro: number }
@@ -563,6 +574,8 @@ function quotaPayload(db: GatewayDatabase, accountId: string, settings: Settings
       usedMicro: state.freeUsedMicro,
       remainingMicro: state.freeRemainingMicro,
       resetAt: state.resetAt,
+      // Lets the client say so before a user picks a model the allowance skips.
+      coveredProviders: (['deepseek', 'openai'] as const).filter((provider) => !FREE_ALLOWANCE_EXCLUDED.has(provider)),
     },
     wallet: { balanceMicro: state.walletMicro },
     total: { remainingMicro: state.totalRemainingMicro },

@@ -283,3 +283,51 @@ test('a Sol request is attributed to its session from the body, not the header',
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('the free allowance does not cover OpenAI models, only the cheap upstream', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-openai-free-'))
+  const db: GatewayDatabase = openDatabase(path.join(directory, 'gateway.db'))
+  const accountId = createTokenAccount(db, '免费额度不覆盖 Sol')
+  const token = 'free-allowance-exclusion-token'
+  storeToken(db, { userId: accountId, label: 'test', tokenHash: hashToken(token) })
+  writeSetting(db, 'quota.mode', 'enforce')
+
+  const upstream: Server = createHttpServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({
+      model: 'gpt-6-sol',
+      usage: { input_tokens: 1000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 10 },
+    }))
+  })
+  await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+  const upstreamPort = (upstream.address() as AddressInfo).port
+
+  const gateway = createGatewayServer({
+    db,
+    upstreamBaseUrl: 'http://127.0.0.1:1',
+    apiKey: 'unused',
+    openaiUpstream: { upstreamBaseUrl: `http://127.0.0.1:${upstreamPort}/v1`, apiKey: 'sk-test', stripPrefix: '/openai' },
+    dailyLimit: 0,
+  })
+  await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', resolve))
+  const port = (gateway.address() as AddressInfo).port
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/openai/v1/responses`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-6-sol', input: 'hi' }),
+    })
+    assert.equal(response.status, 200)
+    const row = db.prepare('SELECT paidFromFreeMicro, billableMicro FROM usage WHERE model = ? ORDER BY id DESC LIMIT 1').get('gpt-6-sol') as
+      | { paidFromFreeMicro: number | null; billableMicro: number | null }
+      | undefined
+    assert.equal(row?.paidFromFreeMicro, 0, 'Sol 不消耗免费额度')
+    assert.ok((row?.billableMicro ?? 0) > 0, '仍然要结算，只是全部从余额走')
+  } finally {
+    await new Promise<void>((resolve) => gateway.close(() => resolve()))
+    await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    db.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

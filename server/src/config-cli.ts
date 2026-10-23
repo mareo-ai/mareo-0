@@ -50,6 +50,11 @@ function show(db: GatewayDatabase, account: string | undefined): void {
   const readable: Record<string, string> = {
     'quota.mode': effective.quotaMode,
     'quota.dailyFreeMicro': `${effective.dailyFreeMicro}（${yuan(effective.dailyFreeMicro)}）`,
+    'quota.freeTiers': effective.freeTiers.length === 0
+      ? '未配置（全部账号固定用 dailyFreeMicro）'
+      : effective.freeTiers
+          .map((tier) => `累计 ${yuan(tier.atMicro)} → 当日 ${yuan(tier.allowanceMicro)}`)
+          .join('；'),
     'quota.rewardAmountMicro': `${effective.rewardAmountMicro}（${yuan(effective.rewardAmountMicro)}）`,
     'quota.dailyRewardCapMicro': `${effective.dailyRewardCapMicro}（${yuan(effective.dailyRewardCapMicro)}）`,
     'quota.rewardMinSeconds': `${effective.rewardMinSeconds} 秒`,

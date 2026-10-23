@@ -219,6 +219,9 @@ test('the gateway decides the amounts and the channels', async () => {
   assert.match(panel, /使用支付宝支付 ¥30\.00/)
   assert.match(panel, /"aria-pressed":true/, 'selected amount is discernible')
   assert.match(panel, /先扣今日免费额度/)
+  // 免费额度不覆盖 OpenAI 上游：额度条显示 100% 时，选 Mareo-O 仍会被拒，
+  // 这一句是唯一能在界面上解释它的地方。
+  assert.match(panel, /Mareo-O 系列不占免费额度/)
 })
 
 test('paying sends the tier and shows the QR the gateway rendered', async () => {

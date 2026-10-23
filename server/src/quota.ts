@@ -32,6 +32,32 @@ export interface CreditState {
 }
 
 /**
+ * How much free allowance this account has consumed over its whole life, before
+ * today. This is what decides today's allowance: a heavy user drops a tier after
+ * a few days, an occasional one keeps the top allowance for months.
+ */
+export function lifetimeFreeUsedMicro(db: GatewayDatabase, accountId: string, now = new Date()): number {
+  const row = db
+    .prepare('SELECT COALESCE(SUM(paidFromFreeMicro), 0) AS total FROM usage WHERE userId = ? AND ts < ?')
+    .get(accountId, startOfDay(now)) as { total: number }
+  return row.total
+}
+
+/**
+ * Today's allowance for an account whose lifetime consumption is `lifetime`.
+ * The tiers are ordered ascending, so the last one that applies wins; below the
+ * first threshold the full `quota.dailyFreeMicro` applies.
+ */
+export function dailyAllowanceMicro(settings: Settings, lifetime: number): number {
+  let allowance = settings.dailyFreeMicro
+  for (const tier of settings.freeTiers) {
+    if (lifetime < tier.atMicro) break
+    allowance = tier.allowanceMicro
+  }
+  return allowance
+}
+
+/**
  * What today's free allowance has covered. Requests recorded before billing
  * existed carry no figure and the day they were written is the day we deployed,
  * so the free bucket reads as refilled once — a one-day, one-off difference.
@@ -65,10 +91,13 @@ export function creditState(
   now = new Date(),
 ): CreditState {
   const freeUsedMicro = freeUsedMicroToday(db, accountId, now)
-  const freeRemainingMicro = Math.max(0, settings.dailyFreeMicro - freeUsedMicro)
+  // Judged once per day from what was consumed before today, so a request that
+  // crosses a tier boundary does not shrink the allowance it is being spent from.
+  const freeLimitMicro = dailyAllowanceMicro(settings, lifetimeFreeUsedMicro(db, accountId, now))
+  const freeRemainingMicro = Math.max(0, freeLimitMicro - freeUsedMicro)
   const walletMicro = walletBalanceMicro(db, accountId)
   return {
-    freeLimitMicro: settings.dailyFreeMicro,
+    freeLimitMicro,
     freeUsedMicro,
     freeRemainingMicro,
     walletMicro,

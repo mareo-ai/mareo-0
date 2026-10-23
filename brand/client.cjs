@@ -542,7 +542,7 @@ function RechargePanel() {
           '使用' + (channel === 'alipay' ? '支付宝' : '微信') + '支付 ' + amountOf(tier)),
         notice ? React.createElement('div', { role: 'alert', style: { fontSize: 12, color: 'var(--dsw-alias-accent, #3d6bfe)' } }, notice) : null,
         React.createElement('div', { style: { fontSize: 12, opacity: 0.65, lineHeight: 1.7 } },
-          '先扣今日免费额度，用完再扣余额；余额长期有效。'),
+          '先扣今日免费额度，用完再扣余额；Mareo-O 系列不占免费额度，直接扣余额。'),
       )
       : null,
 
