@@ -115,12 +115,23 @@ test('the meter shows both buckets in yuan and nothing else', async () => {
   assert.ok(node !== null)
   const text = JSON.stringify(node)
   assert.match(text, /今日免费剩余/)
-  assert.match(text, /¥3\.80 \/ ¥10\.00/)
+  assert.match(text, /38%/, '免费额度只呈现剩余比例')
   assert.match(text, /Mareo 余额/)
-  assert.match(text, /¥23\.50/)
-  assert.match(text, /可用合计/)
-  assert.match(text, /¥27\.30/)
+  assert.match(text, /¥23\.50/, '钱包余额是用户自己的钱，如实显示')
+  assert.match(text, /每日 0 点重置/)
   assert.match(text, /充值余额 →/)
+  // 免费额度的金额不能出现在任何地方：显示 ¥4/¥10 等于把可调的运营参数告诉用户，
+  // 显示「可用合计」则能用 合计−余额 反推出来。
+  assert.doesNotMatch(text, /¥3\.80/)
+  assert.doesNotMatch(text, /¥10\.00/)
+  assert.doesNotMatch(text, /可用合计/)
+
+  const walletOnly = await meterHarness(
+    full({ wallet: { balanceMicro: 0 }, free: { limitMicro: 2_000_000, usedMicro: 1_200_000, remainingMicro: 800_000, resetAt: RESET_AT } }),
+  ).render()
+  const reduced = JSON.stringify(walletOnly)
+  assert.match(reduced, /40%/, '额度从 ¥10 调到 ¥2 时，界面仍是同一个比例口径')
+  assert.doesNotMatch(reduced, /¥2\.00|¥0\.80/)
   assert.equal(node.tag, 'button', 'the whole card is a keyboard-accessible recharge action')
   assert.equal(typeof (node.props as { onClick?: unknown }).onClick, 'function')
   assert.match(text, /progressbar/)
@@ -159,9 +170,8 @@ test('a wallet pushed negative by an allowed overdraft reads as a debt', async (
     }),
   )
   const text = JSON.stringify(await harness.render())
-  assert.match(text, /-¥0\.20/)
-  assert.match(text, /可用合计/)
-  assert.match(text, /¥1\.00/)
+  assert.match(text, /-¥0\.20/, '透支后的余额显示为负，用户看得见自己欠了多少')
+  assert.match(text, /10%/, '免费额度只给比例')
 })
 
 test('nothing renders when the gateway is not running a quota for this account', async () => {

@@ -345,8 +345,11 @@ function QuotaMeter({ wide }) {
     style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', fontSize: 12 },
   },
     React.createElement('span', { style: { opacity: 0.75 } }, '今日免费剩余'),
+    // The free allowance is a ratio, not an amount: how generous it is stays an
+    // operational decision, and a user who can read the money will notice every
+    // change to it. The wallet below is the user's own money and stays exact.
     React.createElement('span', { style: { whiteSpace: 'nowrap', fontWeight: 600 } },
-      yuan(free.remainingMicro) + ' / ' + yuan(free.limitMicro)),
+      freeRemainingPercent + '%'),
   ),
   React.createElement('span', {
     style: { ...meterTrackStyle, display: 'block' }, role: 'progressbar',
@@ -364,7 +367,9 @@ function QuotaMeter({ wide }) {
   React.createElement('span', {
     style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12 },
   },
-    React.createElement('span', { style: { opacity: 0.65 } }, '可用合计 ' + yuan(snapshot.total.remainingMicro)),
+    // No total: it would let anyone subtract the wallet balance and recover the
+    // free allowance's amount, which is exactly what the percentage hides.
+    React.createElement('span', { style: { opacity: 0.65 } }, '每日 0 点重置'),
     React.createElement('span', {
       style: { color: 'var(--dsw-alias-accent, #3d6bfe)', fontWeight: 600, whiteSpace: 'nowrap' },
     }, '充值余额 →'),
