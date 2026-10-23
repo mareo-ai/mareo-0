@@ -49,8 +49,9 @@ bash -c 'ulimit -n 65536; npx electron-forge package --arch=arm64'
 API 只返回名字和更新时间，CI 日志里它被自动替换成 `***`，会话记录里也从未留存过值（当时是直接
 在控制台取到后填进 GitHub 的）。
 
-**怎么确认**：锐成控制台「代码签名证书 → 详情」→ **证书ID**，形如 `cert-2080243108359966720`（带前缀，整串照抄）。
-看到 `订阅ID`、`CA 订单号`、`证书指纹` 都不是它。
+**怎么确认**：跑 `signtool quota --json`，服务端返回的 `certCode` 就是它——形如 `261008Fofim2rmsx`，
+即控制台上的**订阅ID**。别取「证书ID」（`cert-…`）、CA 订单号或证书指纹：这几个看起来都像编号，
+但只有 `certCode` 能用。没有 AK/SK 时无法从控制台的字段外观推断，只能问服务端。
 
 **修法**：`gh secret set SSLTRUS_CERT_CODE --body "cert-..."`。
 
