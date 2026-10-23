@@ -83,9 +83,17 @@ spctl -a -t exec -vv "$APP"            # 期望: accepted, source=Notarized Deve
 
 **CI 需要的三个 secret**：`SSLTRUS_ACCESS_KEY`、`SSLTRUS_ACCESS_SECRET`、`SSLTRUS_CERT_CODE`。前两个建议用**订阅密钥**（控制台 → 代码签名证书 → 详情 → 安全 → Access Key → 创建凭证，权限只覆盖这一张证书）。
 
-**证书编号（Cert Code）是什么**：锐成控制台「代码签名证书 → 详情」里的**证书ID**，形如 `cert-2080243108359966720`，
-**带 `cert-` 前缀**、整串照抄。它不是订阅ID（`261008…`）、不是 CA 订单号、也不是证书指纹。
-`scripts/sign-windows.cjs` 原样传给 CLI 的 `--cert-code`，不做任何拼接，所以前缀不能省。
+**证书编号（Cert Code）是什么**：锐成控制台「代码签名证书 → 详情」里的**订阅ID**，形如 `261008Fofim2rmsx`。
+**不要**取「证书ID」（`cert-…`）、CA 订单号或证书指纹——那几个都不是 CLI 的 `--cert-code`。
+
+唯一可靠的确认方式是用同一套 AK/SK 问服务端，它返回什么就用什么：
+
+```sh
+ACCESS_KEY=… ACCESS_SECRET=… signtool quota --json
+# [{"certCode":"261008Fofim2rmsx","certificate":"…","remaining":978,"total":1000}]
+```
+
+`scripts/sign-windows.cjs` 把该值原样传给 `--cert-code`，不做任何拼接、也不补前缀。
 
 **证书编号（Cert Code）怎么拿**：`SSLTRUS_CERT_CODE` 就是他们 CLI 的 `--cert-code`，指"用哪张证书签名"。权威拿法是配置好 AK/SK 后跑一次：
 
