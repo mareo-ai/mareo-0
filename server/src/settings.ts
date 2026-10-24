@@ -46,6 +46,9 @@ export interface Settings {
   freeTiers: FreeTier[]
   /** Domains that only exist to receive one confirmation email and then vanish. */
   blockedEmailDomains: string[]
+  inviteRewardMicro: number
+  inviteMaxPerInviter: number
+  inviteMinAccountAgeHours: number
 }
 
 export interface FreeTier {
@@ -65,6 +68,9 @@ const SETTING_DEFAULTS: Record<string, string> = {
   'quota.freeTiers': '30000000:6000000,60000000:4000000,100000000:3000000',
   // Found in production: twelve accounts signed up through these and consumed
   // most of a month's free allowance. The rest are well-known services.
+  'invite.rewardMicro': '5000000',
+  'invite.maxPerInviter': '3',
+  'invite.minAccountAgeHours': '24',
   'auth.blockedEmailDomains':
     'deepyinc.com,inctart.com,swagpapa.com,123mails.org,besttempmail.com,mowan666.com,' +
     'mailinator.com,guerrillamail.com,10minutemail.com,temp-mail.org,yopmail.com,sharklasers.com,' +
@@ -93,6 +99,9 @@ export const SETTING_KEYS: { key: string; meaning: string }[] = [
   { key: 'billing.settlementRate', meaning: '默认销售倍率（1.3 = 按真实成本的 1.3 倍结算）' },
   { key: 'billing.modelRates', meaning: '按模型覆盖倍率，格式 模型名:倍率，逗号分隔；空=全部用默认倍率' },
   { key: 'auth.blockedEmailDomains', meaning: '禁止注册的一次性邮箱域名，逗号分隔；子域名同样拦截' },
+  { key: 'invite.rewardMicro', meaning: '邀请成功后给邀请人的额度，微元' },
+  { key: 'invite.maxPerInviter', meaning: '每人最多因邀请获得几次奖励' },
+  { key: 'invite.minAccountAgeHours', meaning: '被邀请账号注册满多少小时才有资格让邀请人获益' },
 ]
 
 export function readRawSettings(db: GatewayDatabase): Map<string, string> {
@@ -175,6 +184,9 @@ export function readSettings(db: GatewayDatabase): Settings {
       .split(',')
       .map((entry) => entry.trim().toLowerCase())
       .filter((entry) => entry !== ''),
+    inviteRewardMicro: wholeNumber(value('invite.rewardMicro'), 5_000_000),
+    inviteMaxPerInviter: wholeNumber(value('invite.maxPerInviter'), 3),
+    inviteMinAccountAgeHours: wholeNumber(value('invite.minAccountAgeHours'), 24),
   }
 }
 

@@ -10,6 +10,7 @@ import { parseSiteView, recordSiteView } from './site-views.js'
 import { startOfDay } from './clock.js'
 import { costOf, fxRate, providerForModel, settleMicro, type Provider } from './pricing.js'
 import { recordUsage, countRequestsSince, type UsageBilling } from './usage.js'
+import { inviteSummary, recordInvite, settleInviteForUser } from './invites.js'
 import { readSponsoredAd, recordAdEvent } from './sponsored-ad.js'
 import { readSettings, settlementRateFor, type Settings } from './settings.js'
 import { creditState, type CreditState } from './quota.js'
@@ -162,7 +163,7 @@ async function handleRequest(
 
   // Quota meter and reward tasks. Their own namespace, so asking about today's
   // allowance never touches the model proxy or costs anything.
-  if (pathname === '/quota' || pathname.startsWith('/reward/')) {
+  if (pathname === '/quota' || pathname === '/invite' || pathname.startsWith('/reward/')) {
     response.setHeader('cache-control', 'no-store')
     const owner = authenticate(request, options.db)
     if (!owner) {
@@ -173,6 +174,11 @@ async function handleRequest(
 
     if (request.method === 'GET' && pathname === '/quota') {
       sendJson(response, 200, quotaPayload(options.db, owner.userId, settings))
+      return
+    }
+
+    if (request.method === 'GET' && pathname === '/invite') {
+      sendJson(response, 200, inviteSummary(options.db, owner.userId, settings))
       return
     }
 
@@ -359,6 +365,15 @@ async function handleRequest(
     }
     // The session-title call carries the title the user sees in their own list;
     // recording it is what makes "what was this session about" answerable.
+    if (outcome.status === 200) {
+      // A successful request is the evidence that an invited account is really
+      // used, which is the condition the invite reward waits for.
+      try {
+        settleInviteForUser(options.db, owner.userId, settings)
+      } catch (error) {
+        console.error(`[invite] ${owner.userId}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     if (outcome.requestKind === 'title' && outcome.titleText !== undefined) {
       recordSessionTitle(options.db, owner.userId, outcome.sessionId ?? null, outcome.titleText, 'gateway')
     }
@@ -533,7 +548,12 @@ async function handleEmailVerify(options: GatewayOptions, request: IncomingMessa
   }
   const existed = findAccountByEmail(options.db, email) !== undefined
   const account = findOrCreateAccountForIdentity(options.db, 'email', email, displayNameForEmail(email))
-  if (!existed) warnOnSignupBurst(options.db, email)
+  if (!existed) {
+    warnOnSignupBurst(options.db, email)
+    // A code only counts on the account's first creation: an existing account
+    // cannot become someone's referral later.
+    if (typeof body.inviteCode === 'string') recordInvite(options.db, account.id, body.inviteCode)
+  }
   const secret = generateTokenSecret()
   storeToken(options.db, { userId: account.id, label: 'email-login', tokenHash: hashToken(secret) })
   sendJson(response, 200, { token: secret, displayName: account.displayName, accountId: account.id })

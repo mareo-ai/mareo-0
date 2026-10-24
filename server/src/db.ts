@@ -9,7 +9,8 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   displayName TEXT NOT NULL,
-  createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+  createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+  inviteCode TEXT
 );
 
 CREATE TABLE IF NOT EXISTS identities (
@@ -201,9 +202,24 @@ CREATE INDEX IF NOT EXISTS idx_payment_orders_user ON payment_orders(userId, cre
 CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders(status, expiresAt);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_txn
   ON payment_orders(provider, transactionId) WHERE transactionId IS NOT NULL;
+
+  -- One row per invited account: who invited whom, and whether the reward was
+  -- paid. inviteeId is unique because a person can only be invited once.
+  CREATE TABLE IF NOT EXISTS invites (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    inviterId   TEXT NOT NULL REFERENCES users(id),
+    inviteeId   TEXT NOT NULL UNIQUE REFERENCES users(id),
+    code        TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    createdAt   TEXT NOT NULL,
+    grantedAt   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_invites_inviter ON invites(inviterId, status);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_inviteCode
+    ON users(inviteCode) WHERE inviteCode IS NOT NULL;
 `
 
-const SCHEMA_VERSION = 11
+const SCHEMA_VERSION = 12
 
 export function openDatabase(dbPath: string): GatewayDatabase {
   mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true })
@@ -224,6 +240,12 @@ export function openDatabase(dbPath: string): GatewayDatabase {
  * are preserved so existing tokens and usage rows keep pointing at the same
  * user; token-issued users become token identities.
  */
+/** v12: an account's own invite code, generated the first time it is asked for. */
+function addUserColumns(db: GatewayDatabase): void {
+  const columns = (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((row) => row.name)
+  if (!columns.includes('inviteCode')) db.exec('ALTER TABLE users ADD COLUMN inviteCode TEXT')
+}
+
 function addUsageColumns(db: GatewayDatabase): void {
   const columns = (db.prepare('PRAGMA table_info(usage)').all() as { name: string }[]).map((row) => row.name)
   const additions: [string, string][] = [
