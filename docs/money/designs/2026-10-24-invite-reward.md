@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 日期 | 2026-10-24 |
-| 状态 | **draft**（待评审；未写代码） |
+| 状态 | **shipped**（2026-10-24 实现，网关测试 155/155；客户端入口待发版） |
 | 依赖 | [`standard.md`](../standard.md) 第 5 节（入账来源 `invite` 已在枚举内） |
 | 影响 | 新表 `invites`、`users.inviteCode`、注册接口、模型请求成功后的钩子、客户端邀请入口 |
 
@@ -153,3 +153,4 @@ CREATE INDEX idx_invites_inviter ON invites(inviterId, status);
 | 日期 | 改动 |
 |---|---|
 | 2026-10-24 | 建立本设计：¥5 × 3 次、延迟到被邀请人首次成功调用且注册满 24 小时、被邀请人无奖励 |
+| 2026-10-24 | 实现完成：schema v12（`users.inviteCode` + `invites` 表）、`GET /invite`、注册可选 `inviteCode`、成功后结算 |

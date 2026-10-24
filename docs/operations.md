@@ -355,6 +355,22 @@ docker compose exec -T gateway sh -c '
 
 > 已知取舍：每次模型请求都会当天重算一遍该账号已花费的成本（几毫秒，几千行以内）。这样"已花多少"永远等于 `usage` 的结算列，不需要额外维护一个可能算错的计数器。Wallet 余额同理，永远是账本最后一条。真实用量涨到明显影响延迟时再考虑加缓存。
 
+## 邀请
+
+每个账号有一个 8 位邀请码，`GET /invite` 返回它和已获得次数。
+
+**奖励在被邀请人「首次成功调用」且「注册满 24 小时」之后才发放**，不是注册即发——否则等于给批量注册送钱。上限每人 3 次，每次 ¥5。
+
+配置：
+
+```sh
+node dist/src/config-cli.js set invite.rewardMicro 5000000   # ¥5
+node dist/src/config-cli.js set invite.maxPerInviter 3
+node dist/src/config-cli.js set invite.minAccountAgeHours 24
+```
+
+报表：`wallet_ledger` 中 `source='invite'` 的条数与金额即发放量，与 `invites.status='granted'` 应始终一致。
+
 ## 节奏
 
 - **每天**：在容器里跑 `node dist/src/metrics.js` 看五个数——今日活跃、模型成功率与 429、**今日新增账户/安装**、下载次数、字符消耗（定义见上文「安装 / 启动 / 登录 / 引擎 / 首次任务」）。
