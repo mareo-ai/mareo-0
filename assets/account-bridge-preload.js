@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld('__mareoQuota', {
   get: () => ipcRenderer.invoke('mareo:quota:get'),
 })
 
+// The invite code. Read-only: the gateway decides who earned what, and pays it
+// only after the invited account has been used for a day.
+contextBridge.exposeInMainWorld('__mareoInvite', {
+  get: () => ipcRenderer.invoke('mareo:invite:get'),
+})
+
 // Recharge. The main process talks to the gateway and to the payment platform;
 // the renderer gets an amount, an order state and a QR code to show.
 contextBridge.exposeInMainWorld('__mareoPayment', {

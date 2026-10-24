@@ -15,6 +15,7 @@ interface Options {
   config?: unknown
   created?: unknown
   fetchedOrder?: unknown
+  invite?: unknown
 }
 
 function harness(options: Options = {}) {
@@ -83,6 +84,8 @@ function harness(options: Options = {}) {
         orders: async () => [],
       },
       __mareoQuota: { get: async () => null },
+      __mareoInvite: { get: async () => options.invite ?? null },
+      navigator: { clipboard: { writeText: async () => {} } },
       addEventListener: () => {},
       removeEventListener: () => {},
     },
@@ -323,4 +326,42 @@ test('only a well-formed order reaches the panel', () => {
   assert.equal(readOrder(pendingOrder({ amountMicro: '30' })), undefined)
   // Anything that is not an SVG is dropped rather than injected into the page.
   assert.equal(readOrder(pendingOrder({ qrSvg: '<img onerror=alert(1)>' }))?.qrSvg, undefined)
+})
+
+test('the invite block shows the code, the counts, and when a reward lands', async () => {
+  const tested = harness({
+    config: CONFIG,
+    invite: { code: 'ABCD2345', granted: 2, remaining: 1, earnedMicro: 10_000_000, rewardMicro: 5_000_000 },
+  })
+  await tested.settle()
+  await tested.open()
+  const panel = text(tested.draw('overlay'))
+  assert.match(panel, /邀请朋友，你得 ¥5\.00/)
+  assert.match(panel, /ABCD2345/, '邀请码本身要能被看到并复制')
+  assert.match(panel, /已邀请 2 人/)
+  assert.match(panel, /¥10\.00/)
+  assert.match(panel, /还可获得 1 次/)
+  assert.match(panel, /复制/)
+})
+
+test('before anyone joins, the block says when the reward actually arrives', async () => {
+  const tested = harness({
+    config: CONFIG,
+    invite: { code: 'WXYZ6789', granted: 0, remaining: 3, earnedMicro: 0, rewardMicro: 5_000_000 },
+  })
+  await tested.settle()
+  await tested.open()
+  const panel = text(tested.draw('overlay'))
+  assert.match(panel, /还没有人用你的邀请码/)
+  // Paying at sign-up would be a lie: the gateway waits for use plus a day.
+  assert.match(panel, /注册满一天并开始使用后/)
+  assert.doesNotMatch(panel, /¥0\.00/, '没有收益时不显示 0 元')
+})
+
+test('a gateway that returns no invite renders no invite block', async () => {
+  const tested = harness({ config: CONFIG })
+  await tested.settle()
+  await tested.open()
+  const panel = text(tested.draw('overlay'))
+  assert.doesNotMatch(panel, /邀请朋友/)
 })

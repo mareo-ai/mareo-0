@@ -32,10 +32,12 @@ import { stripLocalPaths, Telemetry, type TelemetryEvent } from './telemetry.js'
 import { SponsoredAdClient } from './sponsored-ad.js'
 import { PaymentClient } from './payment.js'
 import { QuotaClient } from './quota.js'
+import { InviteClient } from './invite.js'
 
 let mainWindow: BrowserWindow | undefined
 let sponsoredAd: SponsoredAdClient | undefined
 let quotaClient: QuotaClient | undefined
+let inviteClient: InviteClient | undefined
 let paymentClient: PaymentClient | undefined
 let dshRuntime: DshRuntime | undefined
 let shutdownComplete = false
@@ -253,6 +255,7 @@ async function startMareo(): Promise<void> {
       // the quota that was spent while the previous document was open.
       sponsoredAd = new SponsoredAdClient(GATEWAY_URL, account.token, (url) => shell.openExternal(url))
       quotaClient = new QuotaClient(GATEWAY_URL, account.token)
+      inviteClient = new InviteClient(GATEWAY_URL, account.token)
       paymentClient = new PaymentClient(GATEWAY_URL, account.token)
     }
   })
@@ -642,6 +645,7 @@ async function returnToSignIn(): Promise<void> {
   signInActive = true
   sponsoredAd = undefined
   quotaClient = undefined
+  inviteClient = undefined
   paymentClient = undefined
   if (dshRuntime) {
     const runtime = dshRuntime
@@ -694,6 +698,7 @@ function registerContentBridges(): void {
   // and nothing else. Earning extra quota exists server-side, but has no
   // user-facing entry until a real provider is connected.
   ipcMain.handle('mareo:quota:get', (event) => isDshSender(event) ? quotaClient?.load() ?? null : null)
+  ipcMain.handle('mareo:invite:get', (event) => isDshSender(event) ? inviteClient?.load() ?? null : null)
 
   // Recharge: starting a payment and following it. What may be bought and what a
   // payment means are the gateway's decisions; this only relays them.

@@ -22,6 +22,8 @@ export interface InviteSummary {
   remaining: number
   /** Total credit earned from invites, micro-yuan. */
   earnedMicro: number
+  /** What one reward is worth, so the client never hard-codes the amount. */
+  rewardMicro: number
 }
 
 function generateCode(): string {
@@ -60,6 +62,7 @@ export function inviteSummary(db: GatewayDatabase, accountId: string, settings: 
     granted: granted.n,
     remaining: Math.max(0, settings.inviteMaxPerInviter - granted.n),
     earnedMicro: granted.n * settings.inviteRewardMicro,
+    rewardMicro: settings.inviteRewardMicro,
   }
 }
 

@@ -418,6 +418,26 @@ function RechargePanel() {
   const [phase, setPhase] = React.useState('choose')
   const [notice, setNotice] = React.useState('')
   const [busy, setBusy] = React.useState(false)
+  const [invite, setInvite] = React.useState(null)
+  const [copied, setCopied] = React.useState(false)
+
+  // Loaded when the panel opens: a code never changes, only the counts do.
+  React.useEffect(() => {
+    if (!open || !window.__mareoInvite) return
+    let active = true
+    window.__mareoInvite.get().then((value) => {
+      if (active) setInvite(value)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [open])
+
+  const copyInviteCode = () => {
+    if (!invite) return
+    navigator.clipboard.writeText(invite.code).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }).catch(() => {})
+  }
 
   React.useEffect(() => {
     recharge.subscribe((next) => {
@@ -543,6 +563,40 @@ function RechargePanel() {
         notice ? React.createElement('div', { role: 'alert', style: { fontSize: 12, color: 'var(--dsw-alias-accent, #3d6bfe)' } }, notice) : null,
         React.createElement('div', { style: { fontSize: 12, opacity: 0.65, lineHeight: 1.7 } },
           '先扣今日免费额度，用完再扣余额；Mareo-O 系列不占免费额度，直接扣余额。'),
+        invite === null
+          ? null
+          : React.createElement('div', {
+            style: {
+              display: 'grid', gap: 8, marginTop: 4, paddingTop: 14,
+              borderTop: '1px solid var(--dsw-alias-border-l3, #d0d5dd)',
+            },
+          },
+            React.createElement('span', { style: { fontSize: 13, fontWeight: 600 } },
+              '邀请朋友，你得 ' + yuan(invite.rewardMicro)),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+              React.createElement('code', {
+                style: {
+                  flex: 1, minWidth: 0, padding: '9px 10px', borderRadius: 8,
+                  background: 'var(--dsw-alias-bg-subtle, #f5f6f8)', fontSize: 15,
+                  letterSpacing: 3, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  userSelect: 'all',
+                },
+                'aria-label': '你的邀请码',
+              }, invite.code),
+              React.createElement('button', {
+                type: 'button',
+                style: {
+                  padding: '9px 14px', borderRadius: 8, cursor: 'pointer', font: 'inherit', fontSize: 13,
+                  border: '1px solid var(--dsw-alias-border, #d0d5dd)', background: 'transparent', color: 'inherit',
+                },
+                onClick: copyInviteCode,
+              }, copied ? '已复制' : '复制')),
+            React.createElement('span', { style: { fontSize: 12, opacity: 0.65, lineHeight: 1.6 } },
+              invite.granted === 0
+                ? '还没有人用你的邀请码。对方注册满一天并开始使用后，你才会到账。'
+                : '已邀请 ' + invite.granted + ' 人 · 已获得 ' + yuan(invite.earnedMicro) +
+                  (invite.remaining > 0 ? ' · 还可获得 ' + invite.remaining + ' 次' : ' · 已达上限')),
+          ),
       )
       : null,
 
