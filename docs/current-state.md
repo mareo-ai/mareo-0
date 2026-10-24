@@ -12,7 +12,7 @@
 | 用户实际在用的已发布版本 | **v0.2.1**（v0.2.2 与 v0.2.3 的 macOS 构建都因签名步骤失败，未产出安装包） |
 | 内置 DSH 钉版（`runtime/package.json`） | **`@deepseek-ai/dsh 0.2.1-rc.2`** |
 | 内置 Node | **24.20.0**（macOS arm64 与 Windows x64 各一份 SHA-256） |
-| 线上 schema 版本 | **11**（见 `server/src/db.ts` 的 `SCHEMA_VERSION`） |
+| 线上 schema 版本 | **12**（2026-10-24 13:12 北京时间完成迁移；见 `server/src/db.ts` 的 `SCHEMA_VERSION`） |
 
 **已上架的模型**（展示名 → model id）：
 
@@ -52,6 +52,7 @@ ssh -i ~/.ssh/mareo-0.pem root@114.55.15.112 \
 
 | 事项 | 状态 | 影响 |
 |---|---|---|
+| **邀请迁移导致网关启动失败** | 已于 2026-10-24 13:12 修复上线 | v11 升级先加 `users.inviteCode` 再建索引；公网健康检查恢复 200，数据库检查通过，容器 healthy 且重启次数为 0。备份与验证见 `money/designs/2026-10-24-invite-reward.md` |
 | **macOS 发布构建 EMFILE** | 修复已合并（提高 `kern.maxfilesperproc` + 不再打包类型声明），**待 CI 验证** | v0.2.2 / v0.2.3 都没产出安装包，用户仍停在 v0.2.1 |
 | **OpenAI 费用未与官方账单对账** | 待办 | 价目表来自第三方镜像，内部复算自洽但没有外部账单校验 |
 | **Search/Fetch 计费未记录** | 只有设计文档（`money/designs/2026-10-21-search-billing.md`，draft） | 2026-11-01 起上游按次收费，我们目前不记也不收 |

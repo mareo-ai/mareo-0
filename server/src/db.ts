@@ -285,6 +285,8 @@ function migrate(db: GatewayDatabase): void {
   const columns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[]
   const legacy = columns.some((column) => column.name === 'provider')
   if (!legacy) {
+    // The schema creates an index on inviteCode, so upgrade users first.
+    addUserColumns(db)
     db.exec(SCHEMA)
     addUsageColumns(db)
     // v9: rewards credit the wallet now, and the per-account daily allowance

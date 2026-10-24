@@ -154,3 +154,13 @@ CREATE INDEX idx_invites_inviter ON invites(inviterId, status);
 |---|---|
 | 2026-10-24 | 建立本设计：¥5 × 3 次、延迟到被邀请人首次成功调用且注册满 24 小时、被邀请人无奖励 |
 | 2026-10-24 | 实现完成：schema v12（`users.inviteCode` + `invites` 表）、`GET /invite`、注册可选 `inviteCode`、成功后结算 |
+| 2026-10-24 | 修复 v11 → v12 启动迁移：先调用已有 `addUserColumns`，再执行包含邀请码索引的 schema；本地 157 项测试通过，13:12 北京时间上线并恢复公网健康检查。邀请奖励、计费和余额规则均未调整。 |
+
+### 2026-10-24 迁移故障与恢复记录
+
+- 故障：创建 `idx_users_inviteCode` 时旧版 `users` 还没有 `inviteCode`，网关启动报 `no such column: inviteCode` 并循环退出。
+- 修复：在既有非 v1 迁移路径中先增加用户列，再创建表与索引；保留 schema v12。新增测试覆盖未开始迁移和已部分建表的 v11 库，验证原令牌、请求、账本保留，邀请码唯一约束和重复启动有效。
+- 备份：服务器 `/srv/mareo/server/deploy/backups/invite-migration-20261024/` 保存 `mareo.before.db`、`db.ts.before`、`image.before`；数据库备份完整性检查为 `ok`。未覆盖原有备份。
+- 上线前：新镜像在无网络隔离容器中升级生产备份副本，连续打开两次，15 张已有业务表的历史列逐行摘要均一致（66 个账号、97,950 条 usage、909 条账本）。
+- 上线后：公网 `/health` 返回 `200 {"ok":true}`；容器 `healthy`、`RestartCount=0`；生产数据库 `user_version=12`、邀请码索引存在、`quick_check=ok`，上述三项行数与备份一致。
+- 验证限制：真实模型探针因自动审批拒绝创建/清理生产测试账号及可能计费的调用而未执行；未把健康检查等同于模型上游请求验证。
