@@ -158,6 +158,36 @@ production operating rules and who may write where, the current state snapshot, 
 the known issues. It also lists the file surfaces each workstream owns, so you do not
 edit a file another agent is holding.
 
+## Gateway and database changes: rehearse before deploying
+
+Anything that changes the gateway's code, its database schema, or its
+configuration **must be rehearsed against a copy of the production database
+before it is allowed to serve traffic**. This is not a preference.
+
+The reason is concrete: on 2026-10-24 a migration created an index on a column it
+had not added yet. Every container start failed, the gateway restarted fifteen
+times, and the API returned 502 for ten minutes. The agent that deployed it could
+not repair it, because its own model calls go through the gateway it had just
+broken. Someone else had to fix it.
+
+**Use `server/deploy/deploy-gateway.sh`.** It backs up the database and source,
+builds, then starts the new image against a *copy* of the production database in
+an isolated container. Only if that succeeds does it start a second instance on
+port 3001, wait for it to be healthy, read real rows through it, point nginx at
+it, and stop the old one. Every failure before the switch leaves the running
+gateway untouched.
+
+**Never** deploy with a bare `docker compose up -d --build`. If the script cannot
+be used, say why in the pull request instead of improvising.
+
+**Breaking migrations are out of scope for this flow**: dropping or retyping a
+column cannot run while two versions serve the same SQLite file. Those need a
+maintenance window with the gateway stopped, announced first.
+
+**A migration needs a test that starts from the previous schema.** Every test that
+creates a fresh database runs the `fresh` branch and will never exercise the
+upgrade path — which is exactly how the failed migration passed 155 tests.
+
 ## Money changes: documentation first
 
 Anything that touches money — how a request is priced, what a user is charged, how

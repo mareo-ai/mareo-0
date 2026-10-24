@@ -21,3 +21,24 @@ services:
       # Payment keys, read-only: the app private key never leaves this host, and
       # the container only ever needs to read it.
       - ./secrets:/app/secrets:ro
+
+  # A sibling for deploying: same image, same data, a different loopback port, so
+  # a new build can be started and verified while the current one keeps serving.
+  # Nothing starts it unless a deploy asks for the `next` profile.
+  gateway-next:
+    profiles: ["next"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: mareo-gateway:local
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./secrets:/app/secrets:ro

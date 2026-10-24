@@ -94,16 +94,44 @@ sudo chown 1000:1000 data/mareo.db
 docker compose start gateway
 ```
 
-## 8. 升级
+## 8. 升级（必须预演）
+
+**不要**直接 `docker compose up -d --build`。用脚本，它会在切换前用生产库的副本验证迁移：
 
 ```sh
-cd /srv/mareo && git pull
-cd server/deploy
-docker compose up -d --build      # .env 与 data/ 不动
+cd /srv/mareo/server && rsync -az <本机>/server/src/ . && cd deploy
+./deploy-gateway.sh
 ```
 
-> 改了 `.env` **必须** `docker compose up -d`；`docker compose restart` 不会重读 `.env`。
-> 重建容器会断掉进行中的流式响应，挑低峰做。
+脚本做的六件事，顺序不可改：
+
+| 步 | 动作 | 失败时 |
+|---|---|---|
+| 1 | 备份数据库（`backups/deploy-<时间>.db`）与源码（`src.bak-<时间>`） | 中止 |
+| 2 | 构建镜像 | 中止 |
+| 3 | **用生产库副本**在隔离容器里跑一次迁移 | 中止，**线上零影响** |
+| 4 | 在 3001 端口起新实例（接生产库），等 healthy 并读真实数据 | 停新实例，**线上零影响** |
+| 5 | 切 nginx 到 3001，`reload`，从外网验证 | 切回 3000 |
+| 6 | 停旧实例 | — |
+
+**只有加表/加列这类向后兼容的迁移能走这个流程**。删列、改类型必须停机窗口，并先公告。
+
+### 回滚
+
+脚本失败会自动回滚；手工回滚：
+
+```sh
+cp /etc/nginx/conf.d/mareo-gateway.conf.bak-<时间> /etc/nginx/conf.d/mareo-gateway.conf
+nginx -s reload
+docker compose --profile next stop gateway-next
+docker compose start gateway
+```
+
+### 为什么这么严
+
+2026-10-24：一次迁移先建索引、后加列，容器启动即崩、重启 15 次、API 502 十分钟。**部署它的智能体自己也失去了模型访问**——它的调用走的就是这个网关。最后靠外部工具修复。
+
+> 改了 `.env` 之后同样用脚本部署：`docker compose restart` 不会重读 `.env`。
 
 ## 9. 日常运维速查
 
