@@ -260,6 +260,7 @@ test('the daily allowance falls in steps as an account consumes it over its life
     rewardProvider: 'fake-ad',
     settlementRate: 1.3,
     modelRates: new Map<string, number>(),
+    blockedEmailDomains: [],
   }
   // Below the first threshold the full allowance applies.
   assert.equal(dailyAllowanceMicro(settings, 0), 10_000_000)

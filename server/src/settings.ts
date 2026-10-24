@@ -44,6 +44,8 @@ export interface Settings {
    * allowance for months. Sorted by `atMicro` ascending.
    */
   freeTiers: FreeTier[]
+  /** Domains that only exist to receive one confirmation email and then vanish. */
+  blockedEmailDomains: string[]
 }
 
 export interface FreeTier {
@@ -61,6 +63,12 @@ const SETTING_DEFAULTS: Record<string, string> = {
   'quota.dailyFreeMicro': '10000000',
   // ¥30 -> ¥6, ¥60 -> ¥4, ¥100 -> ¥3. All micro-yuan: 1 元 = 1,000,000.
   'quota.freeTiers': '30000000:6000000,60000000:4000000,100000000:3000000',
+  // Found in production: twelve accounts signed up through these and consumed
+  // most of a month's free allowance. The rest are well-known services.
+  'auth.blockedEmailDomains':
+    'deepyinc.com,inctart.com,swagpapa.com,123mails.org,besttempmail.com,mowan666.com,' +
+    'mailinator.com,guerrillamail.com,10minutemail.com,temp-mail.org,yopmail.com,sharklasers.com,' +
+    'trashmail.com,fakeinbox.com,throwawaymail.com,getnada.com,maildrop.cc,dispostable.com',
   'quota.rewardAmountMicro': '1000000',
   'quota.dailyRewardCapMicro': '3000000',
   'quota.rewardMinSeconds': '15',
@@ -84,6 +92,7 @@ export const SETTING_KEYS: { key: string; meaning: string }[] = [
   { key: 'quota.rewardProvider', meaning: '任务来源：fake-ad（模拟）或将来接入的真实平台' },
   { key: 'billing.settlementRate', meaning: '默认销售倍率（1.3 = 按真实成本的 1.3 倍结算）' },
   { key: 'billing.modelRates', meaning: '按模型覆盖倍率，格式 模型名:倍率，逗号分隔；空=全部用默认倍率' },
+  { key: 'auth.blockedEmailDomains', meaning: '禁止注册的一次性邮箱域名，逗号分隔；子域名同样拦截' },
 ]
 
 export function readRawSettings(db: GatewayDatabase): Map<string, string> {
@@ -162,6 +171,10 @@ export function readSettings(db: GatewayDatabase): Settings {
     settlementRate: positiveRate(value('billing.settlementRate'), DEFAULT_SETTLEMENT_RATE),
     modelRates: parseModelRates(value('billing.modelRates')),
     freeTiers: parseFreeTiers(value('quota.freeTiers')),
+    blockedEmailDomains: (value('auth.blockedEmailDomains') ?? '')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry !== ''),
   }
 }
 
@@ -190,6 +203,10 @@ function validateSetting(key: string, raw: string): string {
     if (!/^[\w-]{1,32}$/.test(value)) throw new Error(`任务来源标识格式不对：${raw}`)
   } else if (key === 'billing.settlementRate') {
     if (positiveRate(value, -1) <= 0) throw new Error(`${key} 需要大于 0 的数，收到 ${raw}`)
+  } else if (key === 'auth.blockedEmailDomains') {
+    for (const domain of value.split(',').map((part) => part.trim()).filter((part) => part !== '')) {
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) throw new Error(`域名格式不对：${domain}`)
+    }
   } else if (key === 'quota.freeTiers') {
     let previous = 0
     for (const entry of value.split(',').map((part) => part.trim()).filter((part) => part !== '')) {

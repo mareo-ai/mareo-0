@@ -6,8 +6,39 @@ export const EMAIL_CODE_COOLDOWN_MS = 60 * 1000
 export const EMAIL_CODE_MAX_ATTEMPTS = 5
 export const EMAIL_DAILY_LIMIT = 20
 
+/**
+ * The form two addresses are compared in. `+tag` and, for Gmail, dots are
+ * delivery details rather than different people, so they are dropped: otherwise
+ * one mailbox can hold as many accounts as it likes, each with its own daily
+ * allowance. The original address is still what we send to.
+ */
 export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase()
+  const trimmed = email.trim().toLowerCase()
+  const at = trimmed.lastIndexOf('@')
+  if (at <= 0) return trimmed
+  const domain = trimmed.slice(at + 1)
+  let local = trimmed.slice(0, at)
+  const plus = local.indexOf('+')
+  if (plus > 0) local = local.slice(0, plus)
+  if (domain === 'gmail.com' || domain === 'googlemail.com') local = local.replace(/\./g, '')
+  return `${local}@${domain}`
+}
+
+/** The part after `@`, or an empty string when there is none. */
+export function emailDomain(email: string): string {
+  const at = email.lastIndexOf('@')
+  return at < 0 ? '' : email.slice(at + 1).trim().toLowerCase()
+}
+
+/**
+ * Whether this address belongs to a disposable-mail provider. The list is an
+ * operator setting because the services rotate faster than a release: the first
+ * batch was found in production, not predicted.
+ */
+export function isBlockedEmail(email: string, blockedDomains: string[]): boolean {
+  const domain = emailDomain(email)
+  if (domain === '') return false
+  return blockedDomains.some((blocked) => domain === blocked || domain.endsWith(`.${blocked}`))
 }
 
 export function isValidEmail(email: string): boolean {

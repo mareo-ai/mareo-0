@@ -7,6 +7,7 @@ import {
   beginEmailCode,
   EMAIL_CODE_COOLDOWN_MS,
   EMAIL_DAILY_LIMIT,
+  isBlockedEmail,
   normalizeEmail,
   verifyEmailCode,
 } from '../src/email-auth.js'
@@ -81,4 +82,24 @@ test('verification mails normalize the address and auto-register an email identi
   // A second sign-in returns the same account.
   const again = findOrCreateAccountForIdentity(db, 'email', normalized, 'frank')
   assert.equal(again.id, account.id)
+})
+
+test('a plus tag or a Gmail dot is the same mailbox, not a second account', () => {
+  // Otherwise one mailbox holds a separate account per alias, each with its own
+  // daily allowance.
+  assert.equal(normalizeEmail('Alice+work@Example.com'), 'alice@example.com')
+  assert.equal(normalizeEmail('a.b.c@gmail.com'), 'abc@gmail.com')
+  assert.equal(normalizeEmail('a.b.c@googlemail.com'), 'abc@googlemail.com')
+  // Dots are meaningful at other providers and must survive.
+  assert.equal(normalizeEmail('first.last@163.com'), 'first.last@163.com')
+  assert.equal(normalizeEmail('  Mixed@QQ.com '), 'mixed@qq.com')
+})
+
+test('disposable domains are refused, including their subdomains', () => {
+  const blocked = ['deepyinc.com', 'mailinator.com']
+  assert.equal(isBlockedEmail('someone@deepyinc.com', blocked), true)
+  assert.equal(isBlockedEmail('someone@mail.deepyinc.com', blocked), true)
+  assert.equal(isBlockedEmail('someone@163.com', blocked), false)
+  assert.equal(isBlockedEmail('not-deepyinc.com@163.com', blocked), false)
+  assert.equal(isBlockedEmail('no-at-sign', blocked), false)
 })

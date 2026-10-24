@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { generateTokenSecret, hashToken } from './auth.js'
 import { findAccountEmail, renameAccount, revokeToken, findOrCreateAccountForIdentity, findTokenOwner, storeToken, type GatewayDatabase, type TokenOwner } from './db.js'
 import { createAnonymousEventLimiter, parseEvents, recordEvents } from './events.js'
-import { beginEmailCode, isValidEmail, normalizeEmail, verifyEmailCode } from './email-auth.js'
+import { beginEmailCode, isBlockedEmail, isValidEmail, normalizeEmail, verifyEmailCode } from './email-auth.js'
 import { createEmailMailer, type Mailer } from './mailer.js'
 import { proxyRequest, type ProxyConfig, type ProxyOutcome } from './proxy.js'
 import { parseSessionTitleDetail, recordSessionTitle } from './session-titles.js'
@@ -369,6 +369,9 @@ async function handleRequest(
   }
 }
 
+/** New accounts from one mail domain within an hour before we log a warning. */
+const SIGNUP_BURST_ALERT = 5
+
 /**
  * Upstreams the daily free allowance does not cover. One OpenAI request costs
  * more than a whole day's allowance, so those models are charged to the wallet.
@@ -490,6 +493,13 @@ async function handleEmailSend(
     return
   }
   const email = normalizeEmail(body.email)
+  // A disposable domain is refused before a message is sent: the address exists
+  // only to receive this one mail, and every account starts with a full daily
+  // allowance, so each one is a fresh subsidy.
+  if (isBlockedEmail(email, readSettings(options.db).blockedEmailDomains)) {
+    sendJson(response, 400, { error: 'email-not-supported' })
+    return
+  }
   const outcome = beginEmailCode(options.db, email)
   if (!outcome.ok) {
     sendJson(response, 429, { error: outcome.reason })
@@ -512,15 +522,51 @@ async function handleEmailVerify(options: GatewayOptions, request: IncomingMessa
     return
   }
   const email = normalizeEmail(body.email)
+  if (isBlockedEmail(email, readSettings(options.db).blockedEmailDomains)) {
+    sendJson(response, 400, { error: 'email-not-supported' })
+    return
+  }
   const check = verifyEmailCode(options.db, email, body.code)
   if (!check.ok) {
     sendJson(response, 400, { error: check.reason })
     return
   }
+  const existed = findAccountByEmail(options.db, email) !== undefined
   const account = findOrCreateAccountForIdentity(options.db, 'email', email, displayNameForEmail(email))
+  if (!existed) warnOnSignupBurst(options.db, email)
   const secret = generateTokenSecret()
   storeToken(options.db, { userId: account.id, label: 'email-login', tokenHash: hashToken(secret) })
   sendJson(response, 200, { token: secret, displayName: account.displayName, accountId: account.id })
+}
+
+/**
+ * Finds the account behind an address, comparing in the normalised form so an
+ * address that used `+tag` when it signed up still matches the plain one now.
+ */
+function findAccountByEmail(db: GatewayDatabase, email: string): { id: string } | undefined {
+  const rows = db.prepare("SELECT accountId, subject FROM identities WHERE provider = 'email'").all() as {
+    accountId: string
+    subject: string
+  }[]
+  const match = rows.find((row) => normalizeEmail(row.subject) === email)
+  return match === undefined ? undefined : { id: match.accountId }
+}
+
+/**
+ * Logs when one mail domain produced several new accounts within the hour. It
+ * only warns: 163.com and qq.com are ordinary providers, and blocking a real
+ * person costs more than letting a few extra accounts through.
+ */
+function warnOnSignupBurst(db: GatewayDatabase, email: string): void {
+  const domain = email.slice(email.lastIndexOf('@') + 1)
+  if (domain === '') return
+  const since = new Date(Date.now() - 3600 * 1000).toISOString()
+  const recent = db
+    .prepare(`SELECT COUNT(*) AS n FROM identities WHERE provider = 'email' AND createdAt >= ? AND subject LIKE ?`)
+    .get(since, `%@${domain}`) as { n: number }
+  if (recent.n >= SIGNUP_BURST_ALERT) {
+    console.warn(`[auth] ${recent.n} signups from ${domain} in the last hour`)
+  }
 }
 
 function displayNameForEmail(email: string): string {
