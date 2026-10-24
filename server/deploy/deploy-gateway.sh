@@ -17,7 +17,7 @@
 #   5. point nginx at it, reload, verify from outside
 #   6. stop the old slot
 #
-# Deploys alternate between two slots (3000/gateway and 3001/gateway-next): the
+# Deploys alternate between two slots (3000/gateway and 3010/gateway-next): the
 # slot nginx points at keeps serving while the other is rebuilt. A failure before
 # step 5 leaves the running gateway untouched; a failure at or after step 5 points
 # nginx back.
@@ -39,14 +39,15 @@ COMPOSE="docker compose --profile next"
 log() { echo "[deploy] $*"; }
 fail() { echo "[deploy] ✗ $*" >&2; exit 1; }
 
-if ! grep -qE '127\.0\.0\.1:(3000|3001)' "$NGINX_CONF"; then
-  fail "在 ${NGINX_CONF} 里找不到 3000 或 3001，无法判断当前在哪个槽位"
+# 3010, not 3001: grafana already listens on 3001 on this host.
+if ! grep -qE '127\.0\.0\.1:(3000|3010)' "$NGINX_CONF"; then
+  fail "在 ${NGINX_CONF} 里找不到 3000 或 3010，无法判断当前在哪个槽位"
 fi
 if grep -q '127\.0\.0\.1:3000' "$NGINX_CONF"; then
   CURRENT_PORT=3000; CURRENT_SERVICE=gateway
-  TARGET_PORT=3001;  TARGET_SERVICE=gateway-next
+  TARGET_PORT=3010;  TARGET_SERVICE=gateway-next
 else
-  CURRENT_PORT=3001; CURRENT_SERVICE=gateway-next
+  CURRENT_PORT=3010; CURRENT_SERVICE=gateway-next
   TARGET_PORT=3000;  TARGET_SERVICE=gateway
 fi
 TARGET_CONTAINER="mareo-gateway-${TARGET_SERVICE}-1"
@@ -91,7 +92,9 @@ trap cleanup_rehearsal EXIT
 
 # ---------------------------------------------------------------- 1. back up
 log "备份数据库与源码"
-docker compose exec -T gateway node -e "
+# Against whichever slot is serving: after the first deploy that is no longer
+# `gateway`.
+$COMPOSE exec -T "$CURRENT_SERVICE" node -e "
   const { DatabaseSync } = require('node:sqlite')
   const db = new DatabaseSync(process.env.DB_PATH ?? 'data/mareo.db')
   db.prepare('VACUUM INTO ?').run('backups/deploy-${STAMP}.db')
@@ -128,7 +131,10 @@ log "预演通过：迁移能跑通，容器能起来"
 # --------------------------------------------------- 4. start in the idle slot
 log "在 ${TARGET_PORT} 启动新实例（尚未接流量）"
 $COMPOSE stop "$TARGET_SERVICE" >/dev/null 2>&1 || true
-$COMPOSE up -d "$TARGET_SERVICE" 2>&1 | tail -1
+if ! $COMPOSE up -d "$TARGET_SERVICE" 2>&1 | tail -2; then
+  $COMPOSE rm -sf "$TARGET_SERVICE" >/dev/null 2>&1 || true
+  fail "新实例无法启动（端口被占用或镜像有问题）。线上仍在 ${CURRENT_PORT} 提供服务。"
+fi
 if ! wait_healthy "$TARGET_CONTAINER"; then
   log "新实例的日志："
   $COMPOSE logs --tail 30 "$TARGET_SERVICE" 2>&1 | sed 's/^/    /'
