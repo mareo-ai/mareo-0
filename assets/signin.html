@@ -171,6 +171,11 @@
             <button id="send-code" class="send" type="button">发送验证码</button>
           </div>
         </div>
+        <div class="field" id="invite-field" hidden>
+          <label for="invite">邀请码</label>
+          <input id="invite" type="text" maxlength="8" placeholder="8 位邀请码，可不填" autocomplete="off" spellcheck="false" />
+        </div>
+        <button class="link" id="show-invite" type="button">有邀请码？</button>
         <button id="email-sign-in" class="primary" type="button">登录 Mareo</button>
         <p class="status" id="email-status" role="status"></p>
         <button class="link" style="display: none;" id="show-token" type="button">使用访问令牌登录</button>
@@ -197,6 +202,9 @@
       const codeInput = document.getElementById('code')
       const sendButton = document.getElementById('send-code')
       const signInButton = document.getElementById('email-sign-in')
+      const inviteField = document.getElementById('invite-field')
+      const inviteInput = document.getElementById('invite')
+      const showInvite = document.getElementById('show-invite')
       const emailStatus = document.getElementById('email-status')
       const emailMode = document.getElementById('email-mode')
       const tokenMode = document.getElementById('token-mode')
@@ -238,6 +246,12 @@
         }
       })
 
+      showInvite.addEventListener('click', () => {
+        inviteField.hidden = false
+        showInvite.hidden = true
+        inviteInput.focus()
+      })
+
       signInButton.addEventListener('click', async () => {
         const email = emailInput.value.trim()
         const code = codeInput.value.trim()
@@ -247,7 +261,8 @@
         }
         signInButton.disabled = true
         setStatus(emailStatus, '正在登录…')
-        const result = await window.mareo.emailSignIn(email, code)
+        const inviteCode = inviteField.hidden ? '' : inviteInput.value.trim()
+        const result = await window.mareo.emailSignIn(email, code, inviteCode)
         if (result.ok) {
           setStatus(emailStatus, '登录成功，正在启动…', 'ok')
         } else {

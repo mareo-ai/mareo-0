@@ -115,12 +115,14 @@ export type EmailSignIn =
       reason: 'no-code' | 'expired' | 'too-many-attempts' | 'wrong-code' | 'invalid-request' | 'unreachable'
     }
 
-export async function signInWithEmailCode(email: string, code: string): Promise<EmailSignIn> {
+export async function signInWithEmailCode(email: string, code: string, inviteCode = ''): Promise<EmailSignIn> {
   try {
     const response = await fetch(`${GATEWAY_URL}/auth/email/verify`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, code }),
+      // Omitted rather than sent empty: the gateway records an invitation only when
+        // the account is created, and an unknown code is ignored.
+        body: JSON.stringify(inviteCode === '' ? { email, code } : { email, code, inviteCode }),
       signal: AbortSignal.timeout(10_000),
     })
     if (response.status === 200) {

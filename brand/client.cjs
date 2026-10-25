@@ -296,8 +296,35 @@ function yuan(micro) {
   return (micro < 0 ? '-¥' : '¥') + value.toFixed(2)
 }
 
+// A dialog of its own rather than a section of the recharge panel: the code has
+// to be reachable from the quota card, and nobody opens a recharge panel unless
+// they already intend to pay.
+const inviteDialog = {
+  open: false,
+  listeners: new Set(),
+  setOpen(next) {
+    inviteDialog.open = next
+    inviteDialog.listeners.forEach((listener) => listener(next))
+  },
+  subscribe(listener) {
+    inviteDialog.listeners.add(listener)
+    return () => inviteDialog.listeners.delete(listener)
+  },
+}
+
 function QuotaMeter({ wide }) {
   const [snapshot, setSnapshot] = React.useState(null)
+  const [invite, setInvite] = React.useState(null)
+
+  // The reward amount comes from the gateway, like everything else about money.
+  React.useEffect(() => {
+    if (!wide || !window.__mareoInvite) return
+    let active = true
+    window.__mareoInvite.get().then((value) => {
+      if (active) setInvite(value)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [wide])
 
   React.useEffect(() => {
     if (!window.__mareoQuota) return
@@ -330,7 +357,8 @@ function QuotaMeter({ wide }) {
     ? Math.min(100, Math.max(0, Math.round((free.remainingMicro / free.limitMicro) * 100)))
     : 0
 
-  return React.createElement('button', {
+  return React.createElement(React.Fragment, null,
+  React.createElement('button', {
     type: 'button',
     'aria-label': '查看额度并充值 Mareo 余额',
     onClick: () => recharge.setOpen(true),
@@ -380,7 +408,19 @@ function QuotaMeter({ wide }) {
     : null,
   exhausted
     ? React.createElement('span', { style: { fontSize: 12, opacity: 0.65 } }, '免费额度北京时间 0 点后恢复。')
-    : null)
+    : null),
+  invite === null
+    ? null
+    : React.createElement('button', {
+      type: 'button',
+      onClick: () => inviteDialog.setOpen(true),
+      style: {
+        width: '100%', minWidth: 0, padding: '8px 12px', marginTop: 6,
+        textAlign: 'left', font: 'inherit', fontSize: 12, color: 'inherit', cursor: 'pointer',
+        background: 'transparent', opacity: 0.8,
+        border: '1px dashed var(--dsw-alias-border-l3, #d0d5dd)', borderRadius: 8,
+      },
+    }, '邀请朋友，你得 ' + yuan(invite.rewardMicro) + ' →'))
 }
 
 
@@ -407,6 +447,43 @@ const chosenTierStyle = {
 const primaryButtonStyle = {
   width: '100%', padding: '11px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
   font: 'inherit', fontSize: 14, fontWeight: 600, background: 'var(--dsw-alias-accent, #3d6bfe)', color: '#fff',
+}
+
+/**
+ * The invite code itself. Shared by the recharge panel and the invite dialog so
+ * the code is reachable from wherever a user happens to look: the quota card is
+ * the only money surface people open every day, and the recharge panel is where
+ * someone ends up when the allowance runs out.
+ */
+function inviteCard(invite, copied, onCopy) {
+  if (!invite) return null
+  return React.createElement('div', { style: { display: 'grid', gap: 8 } },
+    React.createElement('span', { style: { fontSize: 13, fontWeight: 600 } },
+      '邀请朋友，你得 ' + yuan(invite.rewardMicro)),
+    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+      React.createElement('code', {
+        style: {
+          flex: 1, minWidth: 0, padding: '9px 10px', borderRadius: 8,
+          background: 'var(--dsw-alias-bg-subtle, #f5f6f8)', fontSize: 15,
+          letterSpacing: 3, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          userSelect: 'all',
+        },
+        'aria-label': '你的邀请码',
+      }, invite.code),
+      React.createElement('button', {
+        type: 'button',
+        style: {
+          padding: '9px 14px', borderRadius: 8, cursor: 'pointer', font: 'inherit', fontSize: 13,
+          border: '1px solid var(--dsw-alias-border, #d0d5dd)', background: 'transparent', color: 'inherit',
+        },
+        onClick: onCopy,
+      }, copied ? '已复制' : '复制')),
+    React.createElement('span', { style: { fontSize: 12, opacity: 0.65, lineHeight: 1.6 } },
+      invite.granted === 0
+        ? '还没有人用你的邀请码。对方注册满一天并开始使用后，你才会到账。'
+        : '已邀请 ' + invite.granted + ' 人 · 已获得 ' + yuan(invite.earnedMicro) +
+          (invite.remaining > 0 ? ' · 还可获得 ' + invite.remaining + ' 次' : ' · 已达上限')),
+  )
 }
 
 function RechargePanel() {
@@ -567,36 +644,11 @@ function RechargePanel() {
           ? null
           : React.createElement('div', {
             style: {
-              display: 'grid', gap: 8, marginTop: 4, paddingTop: 14,
+              marginTop: 4, paddingTop: 14,
               borderTop: '1px solid var(--dsw-alias-border-l3, #d0d5dd)',
             },
-          },
-            React.createElement('span', { style: { fontSize: 13, fontWeight: 600 } },
-              '邀请朋友，你得 ' + yuan(invite.rewardMicro)),
-            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-              React.createElement('code', {
-                style: {
-                  flex: 1, minWidth: 0, padding: '9px 10px', borderRadius: 8,
-                  background: 'var(--dsw-alias-bg-subtle, #f5f6f8)', fontSize: 15,
-                  letterSpacing: 3, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                  userSelect: 'all',
-                },
-                'aria-label': '你的邀请码',
-              }, invite.code),
-              React.createElement('button', {
-                type: 'button',
-                style: {
-                  padding: '9px 14px', borderRadius: 8, cursor: 'pointer', font: 'inherit', fontSize: 13,
-                  border: '1px solid var(--dsw-alias-border, #d0d5dd)', background: 'transparent', color: 'inherit',
-                },
-                onClick: copyInviteCode,
-              }, copied ? '已复制' : '复制')),
-            React.createElement('span', { style: { fontSize: 12, opacity: 0.65, lineHeight: 1.6 } },
-              invite.granted === 0
-                ? '还没有人用你的邀请码。对方注册满一天并开始使用后，你才会到账。'
-                : '已邀请 ' + invite.granted + ' 人 · 已获得 ' + yuan(invite.earnedMicro) +
-                  (invite.remaining > 0 ? ' · 还可获得 ' + invite.remaining + ' 次' : ' · 已达上限')),
-          ),
+          }, inviteCard(invite, copied, copyInviteCode)),
+
       )
       : null,
 
@@ -638,6 +690,56 @@ function RechargePanel() {
   ))
 }
 
+function InviteDialog() {
+  const [open, setOpen] = React.useState(inviteDialog.open)
+  const [invite, setInvite] = React.useState(null)
+  const [copied, setCopied] = React.useState(false)
+
+  React.useEffect(() => inviteDialog.subscribe(setOpen), [])
+
+  React.useEffect(() => {
+    if (!open || !window.__mareoInvite) return
+    let active = true
+    window.__mareoInvite.get().then((value) => {
+      if (active) setInvite(value)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [open])
+
+  if (!open) return null
+
+  const copy = () => {
+    if (!invite) return
+    navigator.clipboard.writeText(invite.code).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }).catch(() => {})
+  }
+
+  return React.createElement('div', {
+    style: {
+      position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', background: 'rgba(16,24,40,0.45)',
+    },
+    onClick: (event) => { if (event.target === event.currentTarget) inviteDialog.setOpen(false) },
+  },
+  React.createElement('div', { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'mareo-invite-title', style: panelCardStyle },
+    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+      React.createElement('strong', { id: 'mareo-invite-title', style: { fontSize: 17 } }, '邀请朋友'),
+      React.createElement('button', {
+        type: 'button', 'aria-label': '关闭邀请',
+        style: { border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 18, opacity: 0.65 },
+        onClick: () => inviteDialog.setOpen(false),
+      }, '\u2715'),
+    ),
+    invite === null
+      ? React.createElement('span', { style: { fontSize: 13, opacity: 0.65 } }, '邀请码加载中…')
+      : inviteCard(invite, copied, copy),
+    React.createElement('span', { style: { fontSize: 12, opacity: 0.6, lineHeight: 1.7 } },
+      '把邀请码发给朋友，他在登录页点「有邀请码？」填入即可。'),
+  ))
+}
+
 function RechargeOverlay() {
   return React.createElement(RechargePanel)
 }
@@ -663,6 +765,9 @@ exports.apply = (ctx) => {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'mareo-attribution' }, Attribution))
   if (typeof window !== 'undefined' && window.__mareoPayment) {
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'mareo-recharge' }, RechargeOverlay))
+  }
+  if (typeof window !== 'undefined' && window.__mareoInvite) {
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'mareo-invite' }, InviteDialog))
   }
   if (typeof window !== 'undefined' && (window.__mareoSponsoredAd || window.__mareoQuota)) {
     ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
