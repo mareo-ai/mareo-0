@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="你被邀请使用 Mareo —— 能写代码、写文章、做表格和 PPT 的桌面 AI 助手。">
+  <meta name="theme-color" content="#fafbff">
+  <title>加入 Mareo</title>
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="styles.css?v=20261025">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳转到内容</a>
+  <header class="header wrap">
+    <a class="brand" href="./" aria-label="Mareo"><img src="assets/logo.png" width="42" height="42" alt=""><span>Mareo</span></a>
+  </header>
+
+  <main id="main" class="wrap invite-page">
+    <p class="eyebrow"><span class="status-dot"></span> INVITED</p>
+    <h1>你被邀请使用 <span class="accent">Mareo</span></h1>
+    <p class="invite-lead">一个能在你电脑上真的干活的 AI 助手：读文件、跑命令、改代码、整理表格，一个任务从头做到尾。</p>
+
+    <div class="invite-code-block" id="code-block" hidden>
+      <span class="invite-code-label">你的邀请码</span>
+      <div class="invite-code-row">
+        <code id="invite-code"></code>
+        <button type="button" id="copy-code">复制</button>
+      </div>
+      <p class="invite-hint">安装后打开 Mareo，在登录页点「有邀请码？」，填进去就行。</p>
+    </div>
+
+    <p class="invite-invalid" id="invalid" hidden>这个邀请链接不完整。<a href="./">去首页下载</a>也能用，只是没有邀请奖励。</p>
+
+    <div class="invite-downloads">
+      <a data-download="macos" class="button primary" hidden>下载 Mac 版 ↓</a>
+      <a data-download="windows" class="button secondary" hidden>下载 Windows 版 ↓</a>
+    </div>
+    <p class="invite-note">每天有免费额度，北京时间 0 点恢复。用不完可以充值，¥10 起。</p>
+  </main>
+
+  <script>
+    (function () {
+      var code = (new URLSearchParams(location.search).get('code') || '').trim().toUpperCase()
+      // Same alphabet and length the gateway issues: anything else is a broken link.
+      var valid = /^[2-9A-HJ-NP-Z]{8}$/.test(code)
+
+      if (valid) {
+        document.getElementById('invite-code').textContent = code
+        document.getElementById('code-block').hidden = false
+        var button = document.getElementById('copy-code')
+        button.addEventListener('click', function () {
+          navigator.clipboard.writeText(code).then(function () {
+            button.textContent = '已复制'
+            setTimeout(function () { button.textContent = '复制' }, 1500)
+          }).catch(function () {})
+        })
+      } else {
+        document.getElementById('invalid').hidden = false
+      }
+
+      fetch('updates/latest.json', { cache: 'no-store' })
+        .then(function (response) { return response.ok ? response.json() : null })
+        .then(function (manifest) {
+          if (!manifest || !manifest.downloads) return
+          var mac = document.querySelector('[data-download="macos"]')
+          var win = document.querySelector('[data-download="windows"]')
+          if (manifest.downloads.macos) { mac.href = manifest.downloads.macos; mac.hidden = false }
+          if (manifest.downloads.windows) { win.href = manifest.downloads.windows; win.hidden = false }
+        })
+        .catch(function () {})
+    })()
+  </script>
+</body>
+</html>
