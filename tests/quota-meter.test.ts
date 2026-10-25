@@ -132,8 +132,13 @@ test('the meter shows both buckets in yuan and nothing else', async () => {
   const reduced = JSON.stringify(walletOnly)
   assert.match(reduced, /40%/, '额度从 ¥10 调到 ¥2 时，界面仍是同一个比例口径')
   assert.doesNotMatch(reduced, /¥2\.00|¥0\.80/)
-  assert.equal(node.tag, 'button', 'the whole card is a keyboard-accessible recharge action')
-  assert.equal(typeof (node.props as { onClick?: unknown }).onClick, 'function')
+  // The card is wrapped in a fragment now: the first child is the recharge action,
+  // the second is the invite entry, and both are reachable by keyboard.
+  const parts = (node.children ?? []) as unknown[]
+  const rechargeCard = parts[0] as { tag?: unknown; props?: { onClick?: unknown } }
+  assert.equal(node.tag, undefined, 'the wrapper is a fragment, not a button')
+  assert.equal(rechargeCard?.tag, 'button', 'the card itself is a keyboard-accessible recharge action')
+  assert.equal(typeof rechargeCard?.props?.onClick, 'function')
   assert.match(text, /progressbar/)
   assert.match(text, /"aria-valuenow":38/, 'the bar represents the remaining free allowance')
   // Micro-yuan stops at the gateway: every amount on screen is in yuan.

@@ -436,11 +436,12 @@ function promptForSignIn(): Promise<AccountSession | undefined> {
       return { ok: false, error: messages[result.reason] }
     })
 
-    ipcMain.handle('mareo:email-sign-in', async (_event, rawEmail: unknown, rawCode: unknown) => {
+    ipcMain.handle('mareo:email-sign-in', async (_event, rawEmail: unknown, rawCode: unknown, rawInvite: unknown) => {
       if (typeof rawEmail !== 'string' || typeof rawCode !== 'string') {
         return { ok: false, error: '请输入邮箱和验证码。' }
       }
-      const result = await signInWithEmailCode(rawEmail.trim(), rawCode.trim())
+      const inviteCode = typeof rawInvite === 'string' ? rawInvite.trim().toUpperCase() : ''
+        const result = await signInWithEmailCode(rawEmail.trim(), rawCode.trim(), inviteCode)
       if (!result.ok) {
         recordEvent({ name: 'signin', detail: { result: result.reason, method: 'email' } })
         const messages = {
