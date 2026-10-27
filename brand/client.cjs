@@ -243,7 +243,21 @@ function AccountSection() {
         '仅包含版本、平台、启动与登录结果、异常退出，不含任何对话内容。关闭后立即停止诊断统计上报。广告展示与点击统计独立记录，并关联你的用户 ID，不受此开关控制。',
       ),
     ),
-    React.createElement('div', { style: { display: 'flex', gap: 10 } },
+    React.createElement('div', { style: fieldStyle },
+        React.createElement('span', null, '反馈'),
+        React.createElement('span', { style: { opacity: 0.7, fontSize: 13, lineHeight: 1.7 } },
+          '遇到问题、有想法，或者想加入用户群，直接发给我们。'),
+        React.createElement('button', {
+          type: 'button',
+          style: { ...buttonStyle, width: 'fit-content', padding: '4px 14px' },
+          onClick: () => {
+            if (window.__mareoAccount && window.__mareoAccount.feedback) {
+              window.__mareoAccount.feedback().catch(() => {})
+            }
+          },
+        }, '写信给 Mareo'),
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: 10 } },
       React.createElement('button', {
         type: 'button',
         disabled: busy,

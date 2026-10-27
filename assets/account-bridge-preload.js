@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('__mareoPayment', {
 
 contextBridge.exposeInMainWorld('__mareoAccount', {
   getProfile: () => ipcRenderer.invoke('mareo:account:get'),
+  // Opens a pre-filled mail draft: the environment details are filled in so the
+  // person only has to describe what went wrong.
+  feedback: () => ipcRenderer.invoke('mareo:account:feedback'),
   updateName: (displayName) => ipcRenderer.invoke('mareo:account:update-name', displayName),
   signOut: () => ipcRenderer.invoke('mareo:account:sign-out'),
 })
