@@ -601,6 +601,29 @@ function registerAccountBridge(): void {
     }
     return { ok: true, enabled: preferences.telemetry }
   })
+  // A mail draft with the environment already filled in. Asking someone to
+  // describe their version and platform is the most common way a bug report never
+  // gets written at all.
+  ipcMain.handle('mareo:account:feedback', () => {
+    const stored = loadAccountSession()
+    const version = app.getVersion()
+    const platform = `${process.platform === 'darwin' ? 'macOS' : 'Windows'} ${process.arch}`
+    const subject = `[Mareo ${version} / ${platform}]`
+    const body = [
+      '（在这里描述你遇到的问题，或者想说的话）',
+      '',
+      '',
+      '—— 以下信息会自动附上 ——',
+      `版本：${version}`,
+      `平台：${platform}`,
+      `账号：${stored?.accountId ?? '未登录'}`,
+    ].join('\n')
+    void shell.openExternal(
+      `mailto:contact@mareo.ai?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+    )
+    return { ok: true }
+  })
+
   ipcMain.handle('mareo:account:get', async () => {
     if (!currentAccount) return { ok: false, error: 'signed-out' }
     try {
