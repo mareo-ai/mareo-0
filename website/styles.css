@@ -639,3 +639,70 @@ h3 {
 .invite-note {
   margin-top: 20px;
 }
+
+/* Community page: a QR code people scan with their phone, so it gets room and a
+   white card behind it rather than sitting on the page background. */
+.wechat-card {
+  margin: 36px 0 0;
+  padding: 28px 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  text-align: center;
+}
+.wechat-card img {
+  display: block;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  border-radius: 8px;
+}
+.wechat-card .invite-hint {
+  margin-top: 16px;
+  text-align: left;
+}
+
+/* Community: a QR code has to be scannable, so it keeps its own column and never
+   shrinks below a phone camera's comfort zone. */
+.community {
+  margin: 96px auto 0;
+}
+.community-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 40px;
+  align-items: center;
+  padding: 36px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+}
+.community-card h2 {
+  margin: 10px 0 12px;
+  font-size: clamp(24px, 3.5vw, 32px);
+  letter-spacing: -0.01em;
+}
+.community-card p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.75;
+}
+.community-card .community-mail {
+  font-size: 13px;
+}
+.community-card img {
+  width: 220px;
+  height: auto;
+  display: block;
+  border-radius: 10px;
+}
+@media (max-width: 720px) {
+  .community-card {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+    padding: 28px 22px;
+  }
+}
