@@ -97,7 +97,7 @@ test('compaction triggers below the price cliff, not at 80% of a 1M window', () 
   const yaml = catalogYaml(GATEWAY)
   assert.match(yaml, /^compaction-basic:/m)
   const ratios = [...yaml.matchAll(/thresholdRatio: ([0-9.]+)/g)].map((match) => Number(match[1]))
-  assert.equal(ratios.length, 2, '两个 OpenAI 模型各一条策略')
+  assert.equal(ratios.length, 3, '每个 OpenAI 模型各一条策略（Sol / Astra / Terra）')
   // 1.05M declared window × ratio must land under the cliff, or compaction can
   // never prevent the doubled bill.
   for (const ratio of ratios) {

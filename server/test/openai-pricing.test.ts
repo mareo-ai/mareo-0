@@ -331,3 +331,37 @@ test('the free allowance does not cover OpenAI models, only the cheap upstream',
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('Terra 是 Sol 的一半价，长上下文阶梯也落在厂商的价目上', () => {
+  // Vendor list: cache $0.05 / input $1 / output $5. Above 272K input the WHOLE
+  // request bills at 2x input and 1.5x output — the rule already in place, so
+  // Terra needs no special case.
+  const fx = fxRate()
+  const now = new Date()
+  const near = (actual: number | undefined, expected: number, what: string) => {
+    assert.ok(actual !== undefined, `${what}: 应当有价格`)
+    assert.ok(Math.abs(actual - expected) < 1e-9, `${what}: 期望 ${expected}，实际 ${actual}`)
+  }
+
+  // 100K input stays under the cliff: $0.1 input + $5 output.
+  const flat: TokenUsage = {
+    inputTokens: 100_000, cacheHitTokens: 0, cacheMissTokens: 100_000,
+    outputTokens: 1_000_000, reasoningTokens: 0,
+  }
+  near(costOf(flat, 'gpt-6.1-terra', now), (0.1 * 1 + 1 * 5) * fx, '标准价')
+  // Sol costs exactly twice that at the same input: $2/$10 against $1/$5.
+  near(costOf(flat, 'gpt-6-sol', now), (0.1 * 2 + 1 * 10) * fx, 'Sol 标准价')
+
+  // 300K input crosses the cliff: 0.3M at $2 (doubled) + 1K at $7.5 (1.5x).
+  const long: TokenUsage = {
+    inputTokens: 300_000, cacheHitTokens: 0, cacheMissTokens: 300_000,
+    outputTokens: 1_000, reasoningTokens: 0,
+  }
+  near(costOf(long, 'gpt-6.1-terra', now), (0.3 * 2 + 0.001 * 7.5) * fx, '长上下文阶梯')
+
+  const cached: TokenUsage = {
+    inputTokens: 100_000, cacheHitTokens: 100_000, cacheMissTokens: 0,
+    outputTokens: 0, reasoningTokens: 0,
+  }
+  near(costOf(cached, 'gpt-6.1-terra', now), 0.1 * 0.05 * fx, '缓存读用缓存价')
+})

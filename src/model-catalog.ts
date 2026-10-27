@@ -62,6 +62,12 @@ llm-pi-ai:
       baseURL: ${gatewayUrl}/openai/v1
       apiKeyEnv: MAREO_API_KEY
       models:
+        - id: gpt-6.1-terra
+          name: Mareo-O-61-Terra
+          description: 日常编码与办公任务，比 Sol 便宜一半、响应更快；不占免费额度
+          contextWindow: 1050000
+          maxTokens: 128000
+          input: [text, image]
         - id: gpt-6-sol
           name: Mareo-O-6-Sol
           description: 复杂编程与多步任务；输入超 27 万 token 后整单按 2 倍计费，较贵
@@ -76,6 +82,10 @@ llm-pi-ai:
           input: [text, image]
 compaction-basic:
   modelPolicies:
+    - provider: mareo-openai
+      model: gpt-6.1-terra
+      thresholdRatio: ${compactionThresholdRatio}
+      retainTokens: 40000
     - provider: mareo-openai
       model: gpt-6-sol
       thresholdRatio: ${compactionThresholdRatio}

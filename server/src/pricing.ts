@@ -18,8 +18,9 @@
  * (`PRICING_FX_RATE`, default 7.0). It has no peak/off-peak tiers, but prompts
  * over 272K input tokens bill the whole request at 2x input and 1.5x output:
  *
- *   gpt-6-sol     cached $0.2 | input $2  | output $10
- *   gpt-6-astra   cached $1   | input $10 | output $50
+ *   gpt-6.1-terra cached $0.05 | input $1  | output $5
+ *   gpt-6-sol     cached $0.2  | input $2  | output $10
+ *   gpt-6-astra   cached $1    | input $10 | output $50
  *
  * Byte counts must never be used to price anything — a streaming response is one
  * JSON frame per token, so response bytes overstate tokens by roughly 300x.
@@ -38,6 +39,9 @@ export type Provider = 'deepseek' | 'openai'
 
 /** USD per 1M tokens, as the vendor lists them. */
 const OPENAI_USD_PRICES: Record<string, ModelPrice> = {
+  // Terra is half the price of Sol, and the existing 2x/1.5x long-context rule
+  // reproduces the vendor's step exactly ($0.05 -> $0.10, $5 -> $7.50).
+  'gpt-6.1-terra': { cacheHit: 0.05, cacheMiss: 1, output: 5 },
   'gpt-6-sol': { cacheHit: 0.2, cacheMiss: 2, output: 10 },
   'gpt-6-astra': { cacheHit: 1, cacheMiss: 10, output: 50 },
 }
