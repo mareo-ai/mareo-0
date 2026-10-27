@@ -117,7 +117,7 @@ test('Hero includes both platform downloads, core promise and the real screensho
   const hero = html.split('<section class="hero wrap"')[1].split('</section>')[0];
   assert.match(hero, /data-download="macos"/);
   assert.match(hero, /data-download="windows"/);
-  assert.match(hero, /当前免费，/);
+  assert.match(hero, /当前免费/);
   assert.match(hero, /Free\s+today\./);
   assert.doesNotMatch(html, /不限量|额度上限|Unlimited use|No limits on usage/);
   assert.match(hero, /读取你的文件，调用工具、运行命令，把任务一步步做完/);

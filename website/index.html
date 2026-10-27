@@ -7,11 +7,11 @@
   <meta name="theme-color" content="#fafbff">
   <title>Mareo — 免费的 AI 工作助手</title>
   <link rel="icon" type="image/png" href="assets/logo.png">
-  <link rel="stylesheet" href="styles.css?v=20260918">
+  <link rel="stylesheet" href="styles.css?v=20261027">
   <script src="app.js?v=20260918" defer></script>
   <script src="motion.js?v=20260918" defer></script>
 </head>
-<body>
+<body class="home">
   <a class="skip-link" href="#main"><span lang="zh-CN">跳转到内容</span><span lang="en">Skip to content</span></a>
   <header class="header wrap">
     <a class="brand" href="#" aria-label="Mareo"><img src="assets/logo.png" width="42" height="42" alt=""><span>Mareo</span></a>
@@ -29,18 +29,18 @@
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
         <p class="eyebrow"><span class="status-dot"></span> MAREO · YOUR DESKTOP AI AGENT</p>
-        <h1 id="hero-title"><span lang="zh-CN">当前免费，<br><span class="accent">你的 AI 工作助手。</span></span><span lang="en">Free
-            today.<br><span class="accent">Your AI work assistant.</span></span></h1>
+        <h1 id="hero-title"><span lang="zh-CN"><span class="hero-free">当前免费</span>你的 AI<br><span class="accent">工作助手。</span></span><span lang="en"><span class="hero-free">Free today.</span>Your AI<br><span class="accent">work assistant.</span></span></h1>
         <p class="hero-promise"><span lang="zh-CN">能写代码，能写文章，<br>能做表格和 PPT。</span><span lang="en">Write code. Create content.<br>Make spreadsheets and slides.</span></p>
         <p class="intro"><span lang="zh-CN">读取你的文件，调用工具、运行命令，把任务一步步做完。</span><span lang="en">Read your files, use tools, and run commands to get tasks done, step by step.</span></p>
         <div class="hero-downloads" id="download">
-          <div><a data-download="windows" class="button primary" hidden><span lang="zh-CN">下载 Windows 版</span><span lang="en">Download for Windows</span><span aria-hidden="true">↓</span></a><p data-pending="windows" hidden><span lang="zh-CN">Windows 下载即将开放</span><span lang="en">Windows download coming soon</span></p><small>Windows 10 / 11 · x64</small></div>
-          <div><a data-download="macos" class="button secondary" hidden><span lang="zh-CN">下载 Mac 版</span><span lang="en">Download for Mac</span><span aria-hidden="true">↓</span></a><p data-pending="macos" hidden><span lang="zh-CN">Mac 下载即将开放</span><span lang="en">Mac download coming soon</span></p><small>macOS · Apple Silicon</small></div>
+          <div><a data-download="windows" class="button primary" hidden><svg class="platform-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 4.5 10.5 3v8.3H2zm10-1.8L22 1v10.3H12zM2 12.8h8.5V21L2 19.5zm10 0h10V23l-10-1.7z"/></svg><span class="download-label"><span lang="zh-CN">下载 Windows 版</span><span lang="en">Download for Windows</span></span><span class="download-arrow" aria-hidden="true">↓</span></a><p data-pending="windows" hidden><span lang="zh-CN">Windows 下载即将开放</span><span lang="en">Windows download coming soon</span></p><small>Windows 10 / 11 · x64</small></div>
+          <div><a data-download="macos" class="button secondary" hidden><svg class="platform-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.1 12.7c0-2 1.6-3 1.7-3.1-1-1.4-2.5-1.6-3-1.6-1.3-.1-2.6.8-3.3.8-.6 0-1.7-.8-2.8-.8-1.5 0-2.9.9-3.7 2.2-1.6 2.7-.4 6.7 1.1 8.9.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.9-.7 1.3 0 1.7.7 2.9.7s2-1.1 2.7-2.1c.8-1.2 1.2-2.4 1.2-2.5-.1 0-2.4-.9-2.4-3.9zM15 6.6c.6-.8 1.1-1.9 1-3-.9 0-2.1.6-2.8 1.4-.6.7-1.2 1.9-1 2.9 1 .1 2.1-.5 2.8-1.3z"/></svg><span class="download-label"><span lang="zh-CN">下载 Mac 版</span><span lang="en">Download for Mac</span></span><span class="download-arrow" aria-hidden="true">↓</span></a><p data-pending="macos" hidden><span lang="zh-CN">Mac 下载即将开放</span><span lang="en">Mac download coming soon</span></p><small>macOS · Apple Silicon</small></div>
         </div>
         <noscript><p class="platform">请启用 JavaScript 获取最新下载链接。 / Enable JavaScript for the latest downloads.</p></noscript>
       </div>
       <div class="hero-preview">
         <div class="hero-particles" aria-hidden="true"></div>
+        <div class="preview-heading"><span><span class="status-dot"></span> MAREO WORKSPACE</span><span lang="zh-CN">从想法，到行动</span><span lang="en">From idea to action</span></div>
         <img src="assets/mareo-workspace.png" width="2940" height="1846" alt="Mareo 桌面工作区 / Mareo desktop workspace" fetchpriority="high">
         <p><span lang="zh-CN">你的文件、项目和下一步行动，在同一个工作区。</span><span lang="en">Your files, projects, and next steps. One workspace.</span></p>
       </div>
@@ -54,20 +54,20 @@
         <article><span class="feature-number">01</span><div><h3><span lang="zh-CN">写代码</span><span lang="en">Write code</span></h3><p><span lang="zh-CN">「这个测试挂了，帮我修好」——它读项目、改文件、跑测试，直到通过。</span><span lang="en">“This test is failing — fix it.” It reads the project, edits files, and runs the tests until they pass.</span></p></div></article>
         <article><span class="feature-number">02</span><div><h3><span lang="zh-CN">写文章</span><span lang="en">Create content</span></h3><p><span lang="zh-CN">「把这些资料整理成一份方案」——基于你电脑里的文件写，不是凭空编。</span><span lang="en">“Turn these notes into a proposal.” It writes from the files on your machine, not from nothing.</span></p></div></article>
         <article><span class="feature-number">03</span><div><h3><span lang="zh-CN">做表格和 PPT</span><span lang="en">Make spreadsheets and slides</span></h3><p><span lang="zh-CN">「12 个 CSV 合并成一张，按客户算月度变化」——它读文件、跑脚本、生成新表。</span><span lang="en">“Merge these 12 CSVs and show the monthly change per customer.” It reads the files, runs the script, and writes the new sheet.</span></p></div></article>
-        <article><span class="feature-number">04</span><div><h3><span lang="zh-CN">整理文件</span><span lang="en">Organize files</span></h3><p><span lang="zh-CN">「把下载目录按类型归类」——批量读取、重命名、移动，你只看结果。</span><span lang="en">“Sort my downloads folder by type.” It reads, renames, and moves them in bulk; you just look at the result.</span></p></div></article>
-        <article><span class="feature-number">05</span><div><h3><span lang="zh-CN">查资料</span><span lang="en">Research a topic</span></h3><p><span lang="zh-CN">「查一下这个库怎么升级」——搜网页、读文档，再回来改你的代码。</span><span lang="en">“How do I upgrade this library?” It searches, reads the docs, then comes back and edits your code.</span></p></div></article>
+        <article class="feature-compact"><span class="feature-number">04</span><div><h3><span lang="zh-CN">整理文件</span><span lang="en">Organize files</span></h3><p><span lang="zh-CN">「把下载目录按类型归类」——批量读取、重命名、移动，你只看结果。</span><span lang="en">“Sort my downloads folder by type.” It reads, renames, and moves them in bulk; you just look at the result.</span></p></div></article>
+        <article class="feature-compact"><span class="feature-number">05</span><div><h3><span lang="zh-CN">查资料</span><span lang="en">Research a topic</span></h3><p><span lang="zh-CN">「查一下这个库怎么升级」——搜网页、读文档，再回来改你的代码。</span><span lang="en">“How do I upgrade this library?” It searches, reads the docs, then comes back and edits your code.</span></p></div></article>
       </div>
     </section>
 
-    <section class="task-story wrap" aria-labelledby="pricing-title">
-      <p class="eyebrow">FREE EVERY DAY</p>
-      <h2 id="pricing-title"><span lang="zh-CN">每天有一份<span class="accent">免费额度</span>。</span><span lang="en">A free allowance, <span class="accent">every day</span>.</span></h2>
+    <section class="task-story allowance wrap" aria-labelledby="pricing-title">
+      <div><p class="eyebrow">FREE EVERY DAY</p>
+      <h2 id="pricing-title"><span lang="zh-CN">每天有一份<span class="accent">免费额度</span>。</span><span lang="en">A free allowance, <span class="accent">every day</span>.</span></h2></div>
       <p><span lang="zh-CN">每天有一份免费额度，北京时间 0 点自动恢复。用完之后可以充值：¥10、¥30 或 ¥100，扫码即到账，余额长期有效、不会过期。免费额度覆盖常用的模型；更强的模型直接从余额扣。</span><span lang="en">Every day comes with a free allowance that resets at 00:00 Beijing time. When it runs out, top up with ¥10, ¥30 or ¥100 by QR code; the balance never expires. The free allowance covers the everyday models; stronger ones are charged to your balance.</span></p>
     </section>
 
     <section class="task-story wrap" aria-labelledby="task-title">
-      <p class="eyebrow">BEYOND THE ANSWER</p>
-      <h2 id="task-title"><span lang="zh-CN">不止回答，<span class="accent">还能完成任务。</span></span><span lang="en">More than answers.<br><span class="accent">Work that gets done.</span></span></h2>
+      <div><p class="eyebrow">BEYOND THE ANSWER</p>
+      <h2 id="task-title"><span lang="zh-CN">不止回答，<span class="accent">还能完成任务。</span></span><span lang="en">More than answers.<br><span class="accent">Work that gets done.</span></span></h2></div>
       <p><span lang="zh-CN">复杂的工作，不必拆成一次次提问。Mareo 可以连续调用工具、执行命令、处理文件，再根据结果继续下一步，与你一起推进整个任务。</span><span lang="en">Complex work takes more than a single reply. Mareo can keep using tools, running commands, and working with files, then use the results to take the next step with you.</span></p>
     </section>
 
