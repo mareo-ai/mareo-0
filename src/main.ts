@@ -456,7 +456,22 @@ function promptForSignIn(): Promise<AccountSession | undefined> {
       }
       const account = { token: result.token, accountId: result.accountId }
       saveAccountSession(account)
-      recordEvent({ name: 'signin', detail: { result: 'ok', method: 'email' } })
+      recordEvent({ name: 'signin', detail: { result: 'ok', method: 'email', invite: result.invite } })
+
+      // Anything the user should know about their invite code is shown before the
+      // window closes; a rejected code would otherwise look like a silent success.
+      const notice =
+        result.invite === 'recorded'
+          ? '邀请码已记录。对方注册满一天并开始使用后，邀请人会得到奖励。'
+          : result.invite === 'invalid'
+            ? '邀请码无效，这次登录不受影响。'
+            : result.invite === 'existing-account'
+              ? '这个邮箱之前就注册过，邀请码只在首次注册时算数。'
+              : ''
+      if (notice !== '') {
+        setTimeout(() => settle(account), 2400)
+        return { ok: true, notice }
+      }
       settle(account)
       return { ok: true }
     })

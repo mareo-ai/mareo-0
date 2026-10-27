@@ -548,15 +548,26 @@ async function handleEmailVerify(options: GatewayOptions, request: IncomingMessa
   }
   const existed = findAccountByEmail(options.db, email) !== undefined
   const account = findOrCreateAccountForIdentity(options.db, 'email', email, displayNameForEmail(email))
+  const offered = typeof body.inviteCode === 'string' ? body.inviteCode.trim() : ''
+  // Reported back so the sign-in screen can say what happened. Silently ignoring a
+  // code would leave the inviter waiting for a reward that will never arrive.
+  let inviteState: 'none' | 'recorded' | 'invalid' | 'existing-account' = 'none'
   if (!existed) {
     warnOnSignupBurst(options.db, email)
     // A code only counts on the account's first creation: an existing account
     // cannot become someone's referral later.
-    if (typeof body.inviteCode === 'string') recordInvite(options.db, account.id, body.inviteCode)
+    if (offered !== '') inviteState = recordInvite(options.db, account.id, offered) ? 'recorded' : 'invalid'
+  } else if (offered !== '') {
+    inviteState = 'existing-account'
   }
   const secret = generateTokenSecret()
   storeToken(options.db, { userId: account.id, label: 'email-login', tokenHash: hashToken(secret) })
-  sendJson(response, 200, { token: secret, displayName: account.displayName, accountId: account.id })
+  sendJson(response, 200, {
+    token: secret,
+    displayName: account.displayName,
+    accountId: account.id,
+    invite: inviteState,
+  })
 }
 
 /**

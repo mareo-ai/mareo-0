@@ -98,3 +98,28 @@ test('the fourth invitation stops earning', () => {
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('the gateway reports what it did with the code, so the screen can say it', async () => {
+  // The three outcomes a person can hit, each with a different message.
+  const { db, directory } = harness()
+  try {
+    const inviter = createTokenAccount(db, '邀请人')
+    const code = ensureInviteCode(db, inviter)
+
+    // 1. A brand-new account with a real code.
+    const invitee = createTokenAccount(db, '被邀请人')
+    assert.equal(recordInvite(db, invitee, code), true)
+    assert.equal(db.prepare("SELECT status FROM invites WHERE inviteeId = ?").get(invitee)?.status, 'pending')
+
+    // 2. An unknown code is refused rather than silently accepted.
+    const other = createTokenAccount(db, '另一个')
+    assert.equal(recordInvite(db, other, 'ZZZZZZZZ'), false)
+
+    // 3. The same account cannot be invited twice.
+    assert.equal(recordInvite(db, invitee, code), false)
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM invites').get()?.n, 1)
+  } finally {
+    db.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

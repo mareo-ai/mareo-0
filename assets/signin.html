@@ -128,6 +128,7 @@
       }
       p.status.error { color: var(--error); }
       p.status.ok { color: var(--success); }
+      p.status.warn { color: var(--muted); font-weight: 600; }
       .token-hint { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
 
       @media (prefers-color-scheme: dark) {
@@ -264,7 +265,9 @@
         const inviteCode = inviteField.hidden ? '' : inviteInput.value.trim()
         const result = await window.mareo.emailSignIn(email, code, inviteCode)
         if (result.ok) {
-          setStatus(emailStatus, '登录成功，正在启动…', 'ok')
+          // The main process waits for this notice before closing, so a rejected
+          // invite code is visible instead of vanishing with the window.
+          setStatus(emailStatus, result.notice || '登录成功，正在启动…', result.notice ? 'warn' : 'ok')
         } else {
           signInButton.disabled = false
           setStatus(emailStatus, result.error ?? '登录失败，请重试。', 'error')

@@ -108,8 +108,11 @@ export async function requestEmailCode(email: string): Promise<EmailCodeRequest>
   }
 }
 
+/** What the gateway did with the invite code the user typed. */
+export type InviteOutcome = 'none' | 'recorded' | 'invalid' | 'existing-account'
+
 export type EmailSignIn =
-  | { ok: true; token: string; displayName: string; accountId: string }
+  | { ok: true; token: string; displayName: string; accountId: string; invite: InviteOutcome }
   | {
       ok: false
       reason: 'no-code' | 'expired' | 'too-many-attempts' | 'wrong-code' | 'invalid-request' | 'unreachable'
@@ -126,13 +129,23 @@ export async function signInWithEmailCode(email: string, code: string, inviteCod
       signal: AbortSignal.timeout(10_000),
     })
     if (response.status === 200) {
-      const body = (await response.json()) as { token?: string; displayName?: string; accountId?: string }
+      const body = (await response.json()) as {
+        token?: string
+        displayName?: string
+        accountId?: string
+        invite?: string
+      }
       if (typeof body.token !== 'string') return { ok: false, reason: 'unreachable' }
+      const invite: InviteOutcome =
+        body.invite === 'recorded' || body.invite === 'invalid' || body.invite === 'existing-account'
+          ? body.invite
+          : 'none'
       return {
         ok: true,
         token: body.token,
         displayName: body.displayName ?? 'Mareo user',
         accountId: typeof body.accountId === 'string' ? body.accountId : '',
+        invite,
       }
     }
     const body = (await response.json().catch(() => ({}))) as { error?: string }
