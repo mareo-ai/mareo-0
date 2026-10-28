@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /updates/
+Disallow: /downloads/
+Disallow: /stats/
+
+Sitemap: https://mareo.cn/sitemap.xml
