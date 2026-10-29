@@ -205,6 +205,13 @@ async function launchDshProcess(options: StartDshRuntimeOptions, launch: DshLaun
       env: {
         ...process.env,
         DSH_HOME: options.dshHome,
+        // The plugin manager shells out to pnpm. A packaged app inherits the PATH
+        // of whatever launched it — from Finder that is the system default, which
+        // has no pnpm, so installing a plugin failed with exit code 127. pnpm now
+        // ships as a runtime dependency; its bin directory goes first.
+        PATH: [path.join(options.runtimeDirectory, 'node_modules', '.bin'), process.env.PATH]
+          .filter((entry) => entry !== undefined && entry !== '')
+          .join(path.delimiter),
         ...options.env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
