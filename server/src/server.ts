@@ -304,7 +304,13 @@ async function handleRequest(
   // cost and how it was split is still recorded.
   const settings = readSettings(options.db)
   const credit = creditState(options.db, owner.userId, settings)
-  if (settings.quotaMode === 'enforce' && credit.exhausted) {
+  // An OpenAI request never draws on the daily allowance, so the allowance cannot
+  // decide whether it may run. Checking `credit.exhausted` here let a user with an
+  // empty wallet make unlimited OpenAI calls: nothing spent the allowance, so it
+  // stayed full, every request passed the gate, and the whole cost was debited
+  // from a wallet that was already negative.
+  const canPay = openaiPath ? credit.walletMicro > 0 : !credit.exhausted
+  if (settings.quotaMode === 'enforce' && !canPay) {
     try {
       recordUsage(options.db, {
         userId: owner.userId,

@@ -17,6 +17,7 @@ import { costOf, fxRate, isPeakHour, providerForModel, settleMicro, type TokenUs
 import { usageFromResponseText } from '../src/proxy.js'
 import { createGatewayServer } from '../src/server.js'
 import { writeSetting } from '../src/settings.js'
+import { grantCredit } from '../src/wallet.js'
 
 /** 100K cached + 100K miss: input stays under the long-context threshold. */
 const SAMPLE: TokenUsage = {
@@ -291,6 +292,9 @@ test('the free allowance does not cover OpenAI models, only the cheap upstream',
   const token = 'free-allowance-exclusion-token'
   storeToken(db, { userId: accountId, label: 'test', tokenHash: hashToken(token) })
   writeSetting(db, 'quota.mode', 'enforce')
+  // An OpenAI call can only be paid from the wallet, so the wallet has to hold
+  // something before the request is allowed at all.
+  grantCredit(db, { accountId, amountMicro: 10_000_000, source: 'manual', externalRef: 'test-topup' })
 
   const upstream: Server = createHttpServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' })
