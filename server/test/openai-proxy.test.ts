@@ -39,13 +39,13 @@ interface Harness {
  * CONNECT — the same shape Squid exposes, and the only one undici's ProxyAgent
  * uses for either scheme.
  */
-async function startHarness(options: { withProxy: boolean }): Promise<Harness> {
+async function startHarness(options: { withProxy?: boolean; quotaMode?: 'off' | 'shadow' | 'enforce' } = {}): Promise<Harness> {
   const directory = mkdtempSync(path.join(tmpdir(), 'mareo-proxy-'))
   const db: GatewayDatabase = openDatabase(path.join(directory, 'gateway.db'))
   const accountId = createTokenAccount(db, '代理测试')
   const token = 'proxy-token-123456'
   storeToken(db, { userId: accountId, label: 'test', tokenHash: hashToken(token) })
-  writeSetting(db, 'quota.mode', 'off')
+  writeSetting(db, 'quota.mode', options.quotaMode ?? 'off')
 
   let vendorRequests = 0
   const vendor: Server = createHttpServer((_request, response) => {
@@ -177,4 +177,22 @@ test('a dead proxy fails loudly instead of silently going direct', async () => {
   } finally {
     await harness.close()
   }
+})
+
+test('OpenAI is refused when the wallet is empty, even though the allowance is untouched', () => {
+  // An OpenAI request never spends the daily allowance, so "allowance remaining"
+  // is permanently true for it. Gating on that let a user with no money call
+  // OpenAI indefinitely, with every cost debited from an already-negative wallet.
+  // Enforcement asks a different question for this path: can the wallet pay?
+  return startHarness({ quotaMode: 'enforce' }).then(async (harness) => {
+    try {
+      const refused = await call(harness.gatewayPort)
+      assert.equal(refused.status, 429, '钱包为空时 OpenAI 请求应当被拒')
+      const body = (await refused.json()) as { error?: string }
+      assert.equal(body.error, 'credit-exhausted')
+      assert.equal(harness.vendorRequests(), 0, '被拒的请求不应到达上游')
+    } finally {
+      await harness.close()
+    }
+  })
 })
