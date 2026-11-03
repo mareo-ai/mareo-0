@@ -12,6 +12,17 @@ cd "$(dirname "$0")"
 
 site_dir=/var/www/mareo-site/stats
 
+# Deploys alternate between two slots, so the serving container is not always
+# named `gateway`. Hard-coding it silently broke this cron for seven days: every
+# run failed with `service "gateway" is not running` and the pages kept showing
+# an older snapshot, which is worse than showing nothing.
+nginx_conf=/etc/nginx/conf.d/mareo-gateway.conf
+if grep -q '127\.0\.0\.1:3000' "$nginx_conf" 2>/dev/null; then
+  serving=gateway
+else
+  serving=gateway-next
+fi
+
 # Download requests come from the web server log; the OSS counters need
 # credentials the gateway does not have, so the page reports requests.
 downloads="$(grep -ho 'GET /downloads/[^ ]*' /var/log/nginx/access.log* 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
@@ -22,7 +33,7 @@ publish() {
   local tmp
   tmp="$(mktemp)"
   # Each page renders to a temp file and is moved into place only when complete.
-  docker compose exec -T gateway node dist/src/stats-page.js --page "$page" --downloads "$downloads" > "$tmp"
+  docker compose --profile next exec -T "$serving" node dist/src/stats-page.js --page "$page" --downloads "$downloads" > "$tmp"
   mkdir -p "$(dirname "$target")"
   chmod 644 "$tmp"
   mv "$tmp" "$target"
@@ -31,4 +42,4 @@ publish() {
 publish ceo "$site_dir/index.html"
 publish health "$site_dir/health/index.html"
 publish users "$site_dir/users/index.html"
-echo "$(date -Is) stats pages regenerated (downloads=$downloads)"
+echo "$(date -Is) stats pages regenerated from $serving (downloads=$downloads)"
