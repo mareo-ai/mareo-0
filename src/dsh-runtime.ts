@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { createWriteStream, type WriteStream } from 'node:fs'
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { get } from 'node:http'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -78,6 +78,63 @@ interface DshPackageJson {
 function dshPackageDirectory(runtimeDirectory: string): string {
   return path.join(runtimeDirectory, 'node_modules', '@deepseek-ai', 'dsh')
 }
+/**
+ * Removes model API keys that a user pasted into a DSH settings field.
+ *
+ * DSH keeps those in `.credentials.yaml` under `refs`, and prefers them to the
+ * environment. A pasted vendor key therefore replaces the account token Mareo
+ * injects and every model call fails with "invalid API key" — while the gateway
+ * logs nothing, because the request never reaches it. The symptom looks like
+ * Mareo being broken, and nothing in the UI connects it to a setting the user
+ * touched months earlier.
+ *
+ * Mareo owns these credentials. The keys are removed on every start, the file is
+ * backed up first, and only model keys are touched — a Feishu secret or any other
+ * ref is left exactly where it is.
+ */
+export async function stripPastedModelKeys(dshHome: string): Promise<void> {
+  const modelKeys = new Set(['DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'])
+  const candidates = [path.join(dshHome, '.credentials.yaml')]
+  try {
+    for (const entry of await readdir(path.join(dshHome, 'accounts'), { withFileTypes: true })) {
+      if (entry.isDirectory()) candidates.push(path.join(dshHome, 'accounts', entry.name, '.credentials.yaml'))
+    }
+  } catch {
+    // No accounts directory yet: the file at the root is all there is.
+  }
+
+  for (const file of candidates) {
+    let text: string
+    try {
+      text = await readFile(file, 'utf8')
+    } catch {
+      continue
+    }
+    const kept: string[] = []
+    const removed: string[] = []
+    let inRefs = false
+    for (const line of text.split('\n')) {
+      if (/^refs:\s*$/.test(line)) {
+        inRefs = true
+        kept.push(line)
+        continue
+      }
+      // A line starting at column 0 ends the block.
+      if (inRefs && /^\S/.test(line)) inRefs = false
+      const match = /^\s+([A-Z0-9_]+)\s*:/.exec(line)
+      if (inRefs && match !== null && modelKeys.has(match[1]!)) {
+        removed.push(match[1]!)
+        continue
+      }
+      kept.push(line)
+    }
+    if (removed.length === 0) continue
+    await writeFile(`${file}.bak-${Date.now()}`, text, 'utf8')
+    await writeFile(file, kept.join('\n'), 'utf8')
+    console.log(`[runtime] removed pasted model keys from ${path.basename(file)}: ${removed.join(', ')}`)
+  }
+}
+
 
 /** The DSH version staged under `runtimeDirectory`, or undefined when absent. */
 export async function readDshVersion(runtimeDirectory: string): Promise<string | undefined> {
@@ -114,6 +171,7 @@ export async function startDshRuntime(options: StartDshRuntimeOptions): Promise<
   // DSH resolves third-party plugins from its profile, so use the installed
   // package's file URL. This app-owned overlay never rewrites user config.
   await mkdir(options.dshHome, { recursive: true })
+  await stripPastedModelKeys(options.dshHome)
   const brandPatch = path.join(options.dshHome, 'mareo-brand.patch.json')
   await writeFile(brandPatch, JSON.stringify([
     { id: 'ui-brand-official', disabled: true },

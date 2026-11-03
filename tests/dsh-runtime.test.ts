@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { extractDshUrl, reportableErrorOutput, rotateEngineLog, startDshRuntime, type DshRuntime } from '../src/dsh-runtime.js'
+import { extractDshUrl, reportableErrorOutput, rotateEngineLog, startDshRuntime, stripPastedModelKeys, type DshRuntime } from '../src/dsh-runtime.js'
 
 test('extracts the authenticated loopback URL reported by DSH', () => {
   assert.equal(
@@ -223,5 +223,51 @@ test('a log under the cap is left in place', async () => {
     assert.equal(existsSync(`${file}.1`), false)
   } finally {
     rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a pasted model key is removed from DSH credentials, so it cannot replace the account token', async () => {
+  // DSH prefers `.credentials.yaml` refs over the environment. A vendor key pasted
+  // into a settings field months earlier therefore wins over the token Mareo
+  // injects, and every model call fails with "invalid API key" — the gateway never
+  // sees the request, so it has nothing to log.
+  const home = mkdtempSync(path.join(tmpdir(), 'mareo-creds-'))
+  try {
+    const globalFile = path.join(home, '.credentials.yaml')
+    writeFileSync(globalFile, [
+      'version: 1',
+      'records:',
+      '  client-connection/browser-session:',
+      '    kind: grant',
+      'refs:',
+      '  DEEPSEEK_API_KEY: sk-pasted-by-user',
+      '  FEISHU_APP_SECRET: keep-me',
+      '',
+    ].join('\n'))
+    const accountDir = path.join(home, 'accounts', 'acct-1')
+    mkdirSync(accountDir, { recursive: true })
+    writeFileSync(path.join(accountDir, '.credentials.yaml'), [
+      'version: 1',
+      'records:',
+      'refs:',
+      '  OPENAI_API_KEY: sk-other-vendor',
+      '',
+    ].join('\n'))
+
+    await stripPastedModelKeys(home)
+
+    const global = readFileSync(globalFile, 'utf8')
+    assert.doesNotMatch(global, /DEEPSEEK_API_KEY/, '粘贴的 DeepSeek key 应被删除')
+    assert.match(global, /FEISHU_APP_SECRET: keep-me/, '其他 ref 必须保留')
+    assert.match(global, /client-connection/, 'records 不受影响')
+
+    const account = readFileSync(path.join(accountDir, '.credentials.yaml'), 'utf8')
+    assert.doesNotMatch(account, /OPENAI_API_KEY/)
+
+    // A backup is kept, so a user who really did mean to store a key can recover it.
+    const backups = readdirSync(home).filter((name) => name.startsWith('.credentials.yaml.bak-'))
+    assert.equal(backups.length, 1, '应当留下备份')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
   }
 })
