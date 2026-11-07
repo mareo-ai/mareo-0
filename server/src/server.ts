@@ -14,7 +14,7 @@ import { inviteSummary, recordInvite, settleInviteForUser } from './invites.js'
 import { readSponsoredAd, recordAdEvent } from './sponsored-ad.js'
 import { readSettings, settlementRateFor, type Settings } from './settings.js'
 import { creditState, type CreditState } from './quota.js'
-import { chargeWallet } from './wallet.js'
+import { chargeWallet, grantCredit } from './wallet.js'
 import {
   confirmPayment,
   createPaymentOrder,
@@ -560,6 +560,18 @@ async function handleEmailVerify(options: GatewayOptions, request: IncomingMessa
   let inviteState: 'none' | 'recorded' | 'invalid' | 'existing-account' = 'none'
   if (!existed) {
     warnOnSignupBurst(options.db, email)
+    // The allowance is ¥2 a day, which is a place to start, not enough to judge
+    // the product. A new account gets one ¥10 credit so the first session can be
+    // real; it never resets, and accounts created before this rule get nothing.
+    const signupCredit = readSettings(options.db).signupCreditMicro
+    if (signupCredit > 0) {
+      grantCredit(options.db, {
+        accountId: account.id,
+        amountMicro: signupCredit,
+        source: 'promotion',
+        externalRef: `signup:${account.id}`,
+      })
+    }
     // A code only counts on the account's first creation: an existing account
     // cannot become someone's referral later.
     if (offered !== '') inviteState = recordInvite(options.db, account.id, offered) ? 'recorded' : 'invalid'

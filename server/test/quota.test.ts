@@ -179,9 +179,9 @@ test('a broken setting falls back to the default instead of to zero', () => {
   assert.equal(readSettings(db).dailyFreeMicro, 2_500_000)
   db.prepare("INSERT OR REPLACE INTO settings (key, value, updatedAt) VALUES ('quota.dailyFreeMicro', 'not-a-number', 'x')").run()
   // Zero would block every account; the default is the safe direction.
-  assert.equal(readSettings(db).dailyFreeMicro, 10_000_000)
+  assert.equal(readSettings(db).dailyFreeMicro, 2_000_000)
   db.prepare("DELETE FROM settings WHERE key = 'quota.dailyFreeMicro'").run()
-  assert.equal(readSettings(db).dailyFreeMicro, 10_000_000)
+  assert.equal(readSettings(db).dailyFreeMicro, 2_000_000)
   assert.throws(() => writeSetting(db, 'quota.mode', 'sometimes'), /off/)
   assert.throws(() => writeSetting(db, 'quota.unknown', '1'), /未知配置项/)
 })
@@ -264,6 +264,7 @@ test('the daily allowance falls in steps as an account consumes it over its life
     inviteRewardMicro: 5_000_000,
     inviteMaxPerInviter: 3,
     inviteMinAccountAgeHours: 24,
+    signupCreditMicro: 10_000_000,
   }
   // Below the first threshold the full allowance applies.
   assert.equal(dailyAllowanceMicro(settings, 0), 10_000_000)
@@ -293,7 +294,7 @@ test('consumption today does not shrink today\'s allowance, only tomorrow\'s', (
       29_900_000,
     )
     const before = creditState(db, accountId, settings)
-    assert.equal(before.freeLimitMicro, 10_000_000, '今天的额度仍是 ¥10')
+    assert.equal(before.freeLimitMicro, 2_000_000, '今天的额度仍是 ¥2')
     // Spending ¥12 today crosses the threshold, but not for today.
     db.prepare(`INSERT INTO usage (userId, ts, model, promptChars, completionChars, status, latencyMs, paidFromFreeMicro, billableMicro)
       VALUES (?, ?, 'deepseek-flash', 0, 0, 200, 0, ?, ?)`).run(
@@ -303,7 +304,7 @@ test('consumption today does not shrink today\'s allowance, only tomorrow\'s', (
       12_000_000,
     )
     const after = creditState(db, accountId, settings)
-    assert.equal(after.freeLimitMicro, 10_000_000, '当天跨档不缩水')
+    assert.equal(after.freeLimitMicro, 2_000_000, '当天跨档不缩水')
     assert.equal(after.freeRemainingMicro, 0, '当日额度用尽')
   } finally {
     db.close()

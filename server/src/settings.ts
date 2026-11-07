@@ -19,6 +19,8 @@ export interface Settings {
   quotaMode: QuotaMode
   /** Free allowance per Beijing day. */
   dailyFreeMicro: number
+  /** Credit granted once to a newly created account; zero disables it. */
+  signupCreditMicro: number
   /** Quota credited by one completed task. */
   rewardAmountMicro: number
   /** Ceiling on reward credits per Beijing day. */
@@ -63,11 +65,12 @@ export const DEFAULT_SETTLEMENT_RATE = 1.3
 
 const SETTING_DEFAULTS: Record<string, string> = {
   'quota.mode': 'off',
-  'quota.dailyFreeMicro': '10000000',
+  'quota.dailyFreeMicro': '2000000',
   // ¥30 -> ¥6, ¥60 -> ¥4, ¥100 -> ¥3. All micro-yuan: 1 元 = 1,000,000.
-  'quota.freeTiers': '30000000:6000000,60000000:4000000,100000000:3000000',
+  'quota.freeTiers': '',
   // Found in production: twelve accounts signed up through these and consumed
   // most of a month's free allowance. The rest are well-known services.
+  'signup.creditMicro': '10000000',
   'invite.rewardMicro': '5000000',
   'invite.maxPerInviter': '3',
   'invite.minAccountAgeHours': '24',
@@ -167,7 +170,8 @@ export function readSettings(db: GatewayDatabase): Settings {
   const mode = value('quota.mode')
   return {
     quotaMode: mode === 'shadow' || mode === 'enforce' ? mode : 'off',
-    dailyFreeMicro: wholeNumber(value('quota.dailyFreeMicro'), 10_000_000),
+    dailyFreeMicro: wholeNumber(value('quota.dailyFreeMicro'), 2_000_000),
+    signupCreditMicro: wholeNumber(value('signup.creditMicro'), 10_000_000),
     rewardAmountMicro: wholeNumber(value('quota.rewardAmountMicro'), 1_000_000),
     dailyRewardCapMicro: wholeNumber(value('quota.dailyRewardCapMicro'), 3_000_000),
     rewardMinSeconds: wholeNumber(value('quota.rewardMinSeconds'), 15),

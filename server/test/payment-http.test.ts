@@ -170,7 +170,7 @@ test('the notification is the only thing that credits, and only once', async () 
     total: { remainingMicro: number }
   }
   assert.equal(quota.wallet.balanceMicro, 30_000_000)
-  assert.equal(quota.total.remainingMicro, quota.wallet.balanceMicro + 10_000_000)
+  assert.equal(quota.total.remainingMicro, quota.wallet.balanceMicro + 2_000_000)
 })
 
 test('an amount that does not match the order is never credited', async () => {

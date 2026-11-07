@@ -176,3 +176,62 @@ test('an account the operator did not open has no task and gets no offer', async
   }
   assert.equal(meter.reward, null)
 })
+
+test('a new account is granted the signup credit, and signing in again grants nothing', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-signup-credit-'))
+  const local = openDatabase(path.join(directory, 'gateway.db'))
+  let sentCode = ''
+  const gateway = createGatewayServer({
+    db: local,
+    upstreamBaseUrl: 'http://127.0.0.1:1',
+    apiKey: 'unused',
+    dailyLimit: 0,
+    // The code is stored hashed, so capture it on its way to the mailer.
+    mailer: { sendCode: async (_to: string, code: string) => { sentCode = code } },
+  })
+  const url = await listen(gateway)
+  const address = 'signup-credit-test@example.com'
+
+  // The code is generated server-side and stored, so read it from the table the
+  // sign-in flow just wrote rather than calling the handler directly.
+  const signIn = async (): Promise<Response> => {
+    const sent = await fetch(`${url}/auth/email/send`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: address }),
+    })
+    assert.equal(sent.status, 200)
+    return fetch(`${url}/auth/email/verify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: address, code: sentCode }),
+    })
+  }
+
+  try {
+    const first = await signIn()
+    assert.equal(first.status, 200)
+    const account = (await first.json()) as { accountId: string }
+    const credits = local
+      .prepare("SELECT amountMicro, source, externalRef FROM wallet_ledger WHERE userId = ? AND type = 'credit'")
+      .all(account.accountId) as { amountMicro: number; source: string; externalRef: string }[]
+    assert.equal(credits.length, 1, '新账号只应当有一条入账')
+    assert.equal(credits[0]!.amountMicro, 10_000_000, '赠送金额是 ¥10')
+    assert.equal(credits[0]!.source, 'promotion')
+    assert.equal(credits[0]!.externalRef, `signup:${account.accountId}`)
+
+    // Signing in again is the same account, not a new one.
+    const second = await signIn()
+    assert.equal(second.status, 200)
+    const again = (await second.json()) as { accountId: string }
+    assert.equal(again.accountId, account.accountId)
+    const after = local
+      .prepare("SELECT COUNT(*) AS n FROM wallet_ledger WHERE userId = ? AND type = 'credit'")
+      .get(account.accountId) as { n: number }
+    assert.equal(after.n, 1, '老账号再次登录不应当重复赠送')
+  } finally {
+    await new Promise<void>((resolve) => gateway.close(() => resolve()))
+    local.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
