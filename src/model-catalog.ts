@@ -82,6 +82,19 @@ llm-pi-ai:
           input: [text, image]
 compaction-basic:
   modelPolicies:
+    # DeepSeek is the default route, so its sessions are the long ones. With no
+    # policy it inherits the 80%-of-window trigger — about 840K of a 1M window,
+    # which an ordinary session never reaches. The history is then resent on every
+    # turn and, past 272K input tokens, billed at double. Measured over a week:
+    # 53% of all input sat above 272K and 41% of the cost came from it.
+    - provider: deepseek-official
+      model: deepseek-flash
+      thresholdRatio: ${compactionThresholdRatio}
+      retainTokens: 40000
+    - provider: deepseek-official
+      model: deepseek-v4-pro
+      thresholdRatio: ${compactionThresholdRatio}
+      retainTokens: 40000
     - provider: mareo-openai
       model: gpt-6.1-terra
       thresholdRatio: ${compactionThresholdRatio}

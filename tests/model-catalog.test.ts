@@ -97,7 +97,10 @@ test('compaction triggers below the price cliff, not at 80% of a 1M window', () 
   const yaml = catalogYaml(GATEWAY)
   assert.match(yaml, /^compaction-basic:/m)
   const ratios = [...yaml.matchAll(/thresholdRatio: ([0-9.]+)/g)].map((match) => Number(match[1]))
-  assert.equal(ratios.length, 3, '每个 OpenAI 模型各一条策略（Sol / Astra / Terra）')
+  // DeepSeek is the default route and its sessions are the long ones, so leaving it
+  // on the 80%-of-window default is what kept 53% of all input above the cliff.
+  assert.equal(ratios.length, 5, 'DeepSeek 两个模型 + OpenAI 三个模型各一条策略')
+  assert.match(yaml, /provider: deepseek-official/, 'DeepSeek 必须有策略，否则永远触发不到')
   // 1.05M declared window × ratio must land under the cliff, or compaction can
   // never prevent the doubled bill.
   for (const ratio of ratios) {
