@@ -235,3 +235,31 @@ test('a new account is granted the signup credit, and signing in again grants no
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a model call without a session id is refused with an upgrade message', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-session-required-'))
+  const local = openDatabase(path.join(directory, 'gateway.db'))
+  const gateway = createGatewayServer({ db: local, upstreamBaseUrl: 'http://127.0.0.1:1', apiKey: 'unused', dailyLimit: 0 })
+  const url = await listen(gateway)
+  const account = createTokenAccount(local, '会话必填测试')
+  const secret = 'session-required-token'
+  storeToken(local, { userId: account, label: 'test', tokenHash: hashToken(secret) })
+
+  try {
+    // `?nosession=1` opts out of the test harness's header, so this reaches the
+    // gateway the way an old build or a bare script would.
+    const refused = await fetch(`${url}/v1/chat/completions?nosession=1`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    assert.equal(refused.status, 426)
+    const body = (await refused.json()) as { error?: string; message?: string }
+    assert.equal(body.error, 'client-upgrade-required')
+    assert.match(body.message ?? '', /mareo\.cn/, '要告诉用户去哪里升级')
+  } finally {
+    await new Promise<void>((resolve) => gateway.close(() => resolve()))
+    local.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

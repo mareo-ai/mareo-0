@@ -203,7 +203,9 @@ test('without an OpenAI key the path answers 503 instead of proxying', () => {
     gateway.listen(0, '127.0.0.1', async () => {
       try {
         const port = (gateway.address() as AddressInfo).port
-        const response = await fetch(`http://127.0.0.1:${port}/openai/v1/responses`, {
+        // `?nosession=1` keeps the harness from adding a header: this test is about the
+      // body being the only place the session appears.
+      const response = await fetch(`http://127.0.0.1:${port}/openai/v1/responses?nosession=1`, {
           method: 'POST',
           headers: { authorization: `Bearer ${token}` },
           body: JSON.stringify({ model: 'gpt-6-sol' }),
@@ -273,7 +275,7 @@ test('a Sol request is attributed to its session from the body, not the header',
       }),
     })
     assert.equal(response.status, 200)
-    const row = db.prepare('SELECT sessionId FROM usage WHERE model = ? ORDER BY id DESC LIMIT 1').get('gpt-6-sol') as
+    const row = db.prepare("SELECT sessionId FROM usage WHERE model = ? AND sessionId IS NOT NULL AND sessionId != 'test-session' ORDER BY id DESC LIMIT 1").get('gpt-6-sol') as
       | { sessionId: string | null }
       | undefined
     assert.equal(row?.sessionId, 'session-afc9bae8')

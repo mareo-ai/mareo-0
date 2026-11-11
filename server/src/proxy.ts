@@ -340,6 +340,22 @@ export async function proxyRequest(
   // in `chat` — and the request body, not the path, is what says which it is.
   const requestKind: RequestKind = isSearchRequest(body) ? 'search' : isTitleRequest(body) ? 'title' : 'chat'
 
+  // A Mareo client has sent a session id since 0.2.9; older builds and scripts that
+  // lifted the token out of the app do not. Only the model endpoints are checked —
+  // the file API and the rest never carried a session. The message is what the client
+  // shows the user, and it must say where to go, because that is the whole point:
+  // upgrade, then carry on.
+  const isModelCall = /\/(messages|chat\/completions|responses)(\?|$)/.test(request.url ?? '')
+  if (sessionId == null && isModelCall) {
+    const message = '请升级 Mareo 到最新版后继续使用：https://mareo.cn'
+    if (!response.headersSent) {
+      response.statusCode = 426
+      response.setHeader('content-type', 'application/json; charset=utf-8')
+      response.end(JSON.stringify({ error: 'client-upgrade-required', message }))
+    }
+    return { status: 426, model, promptChars: 0, completionChars: 0, latencyMs: Date.now() - started, requestKind, sessionId }
+  }
+
   const requestPath = request.url ?? '/'
   const forwardedPath =
     config.stripPrefix !== undefined && requestPath.startsWith(config.stripPrefix)
