@@ -21,6 +21,8 @@ export interface Settings {
   dailyFreeMicro: number
   /** Credit granted once to a newly created account; zero disables it. */
   signupCreditMicro: number
+  /** Accounts that get no daily allowance at all — the wallet is their only source. */
+  noAllowanceAccounts: Set<string>
   /** Quota credited by one completed task. */
   rewardAmountMicro: number
   /** Ceiling on reward credits per Beijing day. */
@@ -71,6 +73,7 @@ const SETTING_DEFAULTS: Record<string, string> = {
   // Found in production: twelve accounts signed up through these and consumed
   // most of a month's free allowance. The rest are well-known services.
   'signup.creditMicro': '10000000',
+  'quota.noAllowanceAccounts': '',
   'invite.rewardMicro': '5000000',
   'invite.maxPerInviter': '3',
   'invite.minAccountAgeHours': '24',
@@ -172,6 +175,12 @@ export function readSettings(db: GatewayDatabase): Settings {
     quotaMode: mode === 'shadow' || mode === 'enforce' ? mode : 'off',
     dailyFreeMicro: wholeNumber(value('quota.dailyFreeMicro'), 2_000_000),
     signupCreditMicro: wholeNumber(value('signup.creditMicro'), 10_000_000),
+    noAllowanceAccounts: new Set(
+      (value('quota.noAllowanceAccounts') ?? '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== ''),
+    ),
     rewardAmountMicro: wholeNumber(value('quota.rewardAmountMicro'), 1_000_000),
     dailyRewardCapMicro: wholeNumber(value('quota.dailyRewardCapMicro'), 3_000_000),
     rewardMinSeconds: wholeNumber(value('quota.rewardMinSeconds'), 15),
@@ -241,6 +250,13 @@ function validateSetting(key: string, raw: string): string {
       if (model === undefined || rate === undefined) throw new Error(`格式应为 模型名:倍率，收到 ${entry}`)
       if (!known.includes(model)) throw new Error(`未知模型 ${model}；可用：${known.join(', ')}`)
       if (positiveRate(rate, -1) <= 0) throw new Error(`${entry} 的倍率需要大于 0`)
+    }
+  } else if (key === 'quota.noAllowanceAccounts') {
+    // A comma-separated list of account ids. Empty is the normal state and means
+    // nobody is excluded.
+    const entries = value.split(',').map((entry) => entry.trim())
+    if (entries.some((entry) => entry !== '' && entry.length < 8)) {
+      throw new Error(`${key} 里出现了不像账号 id 的条目：${value}`)
     }
   } else if (wholeNumber(value, -1) < 0) {
     throw new Error(`${key} 需要非负整数，收到 ${raw}`)

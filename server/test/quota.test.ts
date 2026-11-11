@@ -265,6 +265,7 @@ test('the daily allowance falls in steps as an account consumes it over its life
     inviteMaxPerInviter: 3,
     inviteMinAccountAgeHours: 24,
     signupCreditMicro: 10_000_000,
+    noAllowanceAccounts: new Set<string>(),
   }
   // Below the first threshold the full allowance applies.
   assert.equal(dailyAllowanceMicro(settings, 0), 10_000_000)
@@ -306,6 +307,25 @@ test('consumption today does not shrink today\'s allowance, only tomorrow\'s', (
     const after = creditState(db, accountId, settings)
     assert.equal(after.freeLimitMicro, 2_000_000, '当天跨档不缩水')
     assert.equal(after.freeRemainingMicro, 0, '当日额度用尽')
+  } finally {
+    db.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('an account on the no-allowance list starts each day with nothing', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-no-allowance-'))
+  const db = openDatabase(path.join(directory, 'gateway.db'))
+  const accountId = createTokenAccount(db, '取消额度测试')
+  try {
+    writeSetting(db, 'quota.mode', 'enforce')
+    writeSetting(db, 'quota.noAllowanceAccounts', accountId)
+    const credit = creditState(db, accountId, readSettings(db))
+    assert.equal(credit.freeLimitMicro, 0, '名单里的账号当天额度为零')
+    assert.equal(credit.exhausted, true, '钱包为空时直接不能调用')
+    // Removing the entry restores the normal allowance.
+    writeSetting(db, 'quota.noAllowanceAccounts', '')
+    assert.equal(creditState(db, accountId, readSettings(db)).freeLimitMicro, 2_000_000)
   } finally {
     db.close()
     rmSync(directory, { recursive: true, force: true })

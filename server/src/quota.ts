@@ -93,7 +93,12 @@ export function creditState(
   const freeUsedMicro = freeUsedMicroToday(db, accountId, now)
   // Judged once per day from what was consumed before today, so a request that
   // crosses a tier boundary does not shrink the allowance it is being spent from.
-  const freeLimitMicro = dailyAllowanceMicro(settings, lifetimeFreeUsedMicro(db, accountId, now))
+  // An account can be cut off from the allowance entirely; the wallet is then its
+  // only source. Used for accounts that farmed the signup credit across disposable
+  // mailboxes: the account is kept, the subsidy stops.
+  const freeLimitMicro = settings.noAllowanceAccounts.has(accountId)
+    ? 0
+    : dailyAllowanceMicro(settings, lifetimeFreeUsedMicro(db, accountId, now))
   const freeRemainingMicro = Math.max(0, freeLimitMicro - freeUsedMicro)
   const walletMicro = walletBalanceMicro(db, accountId)
   return {
