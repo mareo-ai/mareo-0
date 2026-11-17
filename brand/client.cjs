@@ -13,12 +13,19 @@ const React = require('react')
 ;(function installClipboardShim() {
   const bridge = globalThis.__mareoClipboard
   if (bridge === undefined) return
-  const working = { writeText: (text) => bridge.writeText(text) }
-  if (navigator.clipboard && navigator.clipboard.writeText) return
+  // Replace whatever is there, not only an absent property: a half-working
+  // `navigator.clipboard` (present, but `writeText` rejecting) is exactly the case
+  // that made every copy silently fail, and skipping it would leave it broken.
+  if (navigator.clipboard !== undefined && navigator.clipboard.__mareoBridged === true) return
+  const working = { writeText: (text) => bridge.writeText(text), __mareoBridged: true }
   try {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: working })
   } catch {
-    // Some builds make `navigator` non-extensible; copyText's fallback still runs.
+    try {
+      navigator.clipboard = working
+    } catch {
+      // Some builds make `navigator` non-extensible; copyText's fallback still runs.
+    }
   }
 })()
 
