@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, session, shell, type IpcMainInvokeEvent } from 'electron'
 import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -604,6 +604,13 @@ function registerAccountBridge(): void {
   // A mail draft with the environment already filled in. Asking someone to
   // describe their version and platform is the most common way a bug report never
   // gets written at all.
+  // The window cannot reach `navigator.clipboard`, so copies go through here.
+  ipcMain.handle('mareo:clipboard-write', (_event, rawText: unknown) => {
+    if (typeof rawText !== 'string') return false
+    clipboard.writeText(rawText)
+    return true
+  })
+
   ipcMain.handle('mareo:account:feedback', () => {
     const stored = loadAccountSession()
     const version = app.getVersion()

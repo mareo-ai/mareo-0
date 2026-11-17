@@ -32,6 +32,24 @@ contextBridge.exposeInMainWorld('__mareoPayment', {
   orders: (limit) => ipcRenderer.invoke('mareo:payment:orders', limit),
 })
 
+// The clipboard. `navigator.clipboard` does not exist in this window: it is a
+// `file://` document, and the API is gated behind a secure context. Every copy
+// button that relied on it has therefore failed 100% of the time — not sometimes.
+// This bridge is the working implementation, and the page shim below routes the
+// standard API onto it so DSH's own buttons work too.
+contextBridge.exposeInMainWorld('__mareoClipboard', {
+  writeText: (text) => ipcRenderer.invoke('mareo:clipboard-write', String(text)),
+})
+
+// The clipboard. `navigator.clipboard` does not exist in this window: it is a
+// `file://` document, and that API is gated behind a secure context. Every copy
+// button that relied on it has therefore failed 100% of the time — not sometimes.
+// This bridge is the working implementation; the page shim routes the standard API
+// onto it so DSH's own buttons work too.
+contextBridge.exposeInMainWorld('__mareoClipboard', {
+  writeText: (text) => ipcRenderer.invoke('mareo:clipboard-write', String(text)),
+})
+
 contextBridge.exposeInMainWorld('__mareoAccount', {
   getProfile: () => ipcRenderer.invoke('mareo:account:get'),
   // Opens a pre-filled mail draft: the environment details are filled in so the
