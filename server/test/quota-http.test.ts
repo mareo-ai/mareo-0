@@ -263,3 +263,34 @@ test('a model call without a session id is refused with an upgrade message', asy
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a search request is not refused for lacking a session id', async () => {
+  // Search uses the same Messages endpoint with the same account token, and carries
+  // no session. Requiring one there broke every web search.
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-search-session-'))
+  const local = openDatabase(path.join(directory, 'gateway.db'))
+  const upstream = createHttpServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end('{"ok":true}')
+  })
+  const upstreamUrl = await listen(upstream)
+  const gateway = createGatewayServer({ db: local, upstreamBaseUrl: upstreamUrl, apiKey: 'unused', dailyLimit: 0 })
+  const url = await listen(gateway)
+  const account = createTokenAccount(local, '搜索会话测试')
+  const secret = 'search-session-token'
+  storeToken(local, { userId: account, label: 'test', tokenHash: hashToken(secret) })
+
+  try {
+    const response = await fetch(`${url}/anthropic/v1/messages?nosession=1`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'deepseek-flash', tools: [{ type: 'web_search_20250305' }], messages: [{ role: 'user', content: 'search' }] }),
+    })
+    assert.notEqual(response.status, 426, '搜索不应因缺少 session 被拒')
+  } finally {
+    await new Promise<void>((resolve) => gateway.close(() => resolve()))
+    await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    local.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

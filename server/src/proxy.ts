@@ -346,7 +346,10 @@ export async function proxyRequest(
   // shows the user, and it must say where to go, because that is the whole point:
   // upgrade, then carry on.
   const isModelCall = /\/(messages|chat\/completions|responses)(\?|$)/.test(request.url ?? '')
-  if (sessionId == null && isModelCall) {
+  // Only chat. Search goes through the same Messages endpoint with the account token
+  // and carries no session — requiring one here made every web search fail with the
+  // upgrade message, in the agent and in this very assistant.
+  if (sessionId == null && isModelCall && requestKind === 'chat') {
     const message = '请升级 Mareo 到最新版后继续使用：https://mareo.cn'
     if (!response.headersSent) {
       response.statusCode = 426
