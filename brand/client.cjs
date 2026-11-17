@@ -469,7 +469,45 @@ const primaryButtonStyle = {
  * the only money surface people open every day, and the recharge panel is where
  * someone ends up when the allowance runs out.
  */
-function inviteCard(invite, copied, onCopy) {
+/**
+ * Copies text, with a fallback for the case where `navigator.clipboard` is not
+ * available — in Electron it needs a secure context and a user gesture, and when it
+ * is missing the promise rejects and the button silently does nothing. The fallback
+ * is the old `execCommand` path, which works in a `file://` window.
+ */
+function copyText(text) {
+  if (navigator.clipboard !== undefined && navigator.clipboard.writeText !== undefined) {
+    return navigator.clipboard.writeText(text).catch(() => legacyCopy(text))
+  }
+  return legacyCopy(text)
+}
+
+function legacyCopy(text) {
+  return new Promise((resolve, reject) => {
+    const area = document.createElement('textarea')
+    area.value = text
+    area.style.position = 'fixed'
+    area.style.top = '-1000px'
+    area.style.opacity = '0'
+    document.body.appendChild(area)
+    area.focus()
+    area.select()
+    let ok = false
+    try {
+      ok = document.execCommand('copy')
+    } catch {
+      ok = false
+    }
+    document.body.removeChild(area)
+    if (ok) resolve()
+    else reject(new Error('copy failed'))
+  })
+}
+
+/** Where a shared invite link points; the page shows the code to type into the app. */
+const INVITE_LINK_BASE = 'https://mareo.cn/?invite='
+
+function inviteCard(invite, copied, onCopy, copyFailed) {
   if (!invite) return null
   return React.createElement('div', { style: { display: 'grid', gap: 8 } },
     React.createElement('span', { style: { fontSize: 13, fontWeight: 600 } },
@@ -491,7 +529,10 @@ function inviteCard(invite, copied, onCopy) {
           border: '1px solid var(--dsw-alias-border, #d0d5dd)', background: 'transparent', color: 'inherit',
         },
         onClick: onCopy,
-      }, copied ? '已复制' : '复制')),
+      }, copied ? '已复制' : '复制邀请链接')),
+    copyFailed
+      ? React.createElement('span', { style: { fontSize: 12, color: '#b42318', lineHeight: 1.6 } }, copyFailed)
+      : null,
     React.createElement('span', { style: { fontSize: 12, opacity: 0.65, lineHeight: 1.6 } },
       invite.granted === 0
         ? '还没有人用你的邀请码。对方注册满一天并开始使用后，你才会到账。'
@@ -511,6 +552,7 @@ function RechargePanel() {
   const [busy, setBusy] = React.useState(false)
   const [invite, setInvite] = React.useState(null)
   const [copied, setCopied] = React.useState(false)
+  const [copyFailed, setCopyFailed] = React.useState('')
 
   // Loaded when the panel opens: a code never changes, only the counts do.
   React.useEffect(() => {
@@ -524,10 +566,15 @@ function RechargePanel() {
 
   const copyInviteCode = () => {
     if (!invite) return
-    navigator.clipboard.writeText(invite.code).then(() => {
+    copyText(INVITE_LINK_BASE + invite.code).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    }).catch(() => {})
+    }).catch(() => {
+      // Never fail silently: a button that does nothing reads as broken.
+      setCopied(false)
+      setCopyFailed('复制失败，请手动选中上面的邀请码')
+      setTimeout(() => setCopyFailed(''), 4000)
+    })
   }
 
   React.useEffect(() => {
@@ -661,7 +708,7 @@ function RechargePanel() {
               marginTop: 4, paddingTop: 14,
               borderTop: '1px solid var(--dsw-alias-border-l3, #d0d5dd)',
             },
-          }, inviteCard(invite, copied, copyInviteCode)),
+          }, inviteCard(invite, copied, copyInviteCode, copyFailed)),
 
       )
       : null,
@@ -708,6 +755,7 @@ function InviteDialog() {
   const [open, setOpen] = React.useState(inviteDialog.open)
   const [invite, setInvite] = React.useState(null)
   const [copied, setCopied] = React.useState(false)
+  const [copyFailed, setCopyFailed] = React.useState('')
 
   React.useEffect(() => inviteDialog.subscribe(setOpen), [])
 
@@ -724,10 +772,15 @@ function InviteDialog() {
 
   const copy = () => {
     if (!invite) return
-    navigator.clipboard.writeText(invite.code).then(() => {
+    copyText(INVITE_LINK_BASE + invite.code).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    }).catch(() => {})
+    }).catch(() => {
+      // Never fail silently: a button that does nothing reads as broken.
+      setCopied(false)
+      setCopyFailed('复制失败，请手动选中上面的邀请码')
+      setTimeout(() => setCopyFailed(''), 4000)
+    })
   }
 
   return React.createElement('div', {
@@ -748,7 +801,7 @@ function InviteDialog() {
     ),
     invite === null
       ? React.createElement('span', { style: { fontSize: 13, opacity: 0.65 } }, '邀请码加载中…')
-      : inviteCard(invite, copied, copy),
+      : inviteCard(invite, copied, copy, copyFailed),
     React.createElement('span', { style: { fontSize: 12, opacity: 0.6, lineHeight: 1.7 } },
       '把邀请码发给朋友，他在登录页点「有邀请码？」填入即可。'),
   ))

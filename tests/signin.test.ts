@@ -79,13 +79,12 @@ test('both alternative sign-in actions are keyboard-accessible buttons', () => {
   }
 })
 
-test('the invite code stays out of the way until it is asked for', async () => {
+test('the invite code field is visible from the start', async () => {
+  // It used to hide behind a "have a code?" link, and in practice nobody clicked it:
+  // a whole invite programme ran with zero recorded invitations because the person
+  // being invited never saw a field to type the code into.
   const page = loginPage()
-  // Hidden by default: most people arrive from a link, not carrying a code.
-  assert.equal(page.element('invite-field').hidden, true)
-  await page.element('show-invite').events.click()
   assert.equal(page.element('invite-field').hidden, false)
-  assert.equal(page.element('show-invite').hidden, true)
 })
 
 test('a typed invite code reaches the sign-in call; an untouched field sends nothing', async () => {
@@ -93,9 +92,8 @@ test('a typed invite code reaches the sign-in call; an untouched field sends not
   page.element('email').value = 'invitee@example.test'
   page.element('code').value = '123456'
   await page.element('email-sign-in').events.click()
-  assert.deepEqual(page.invited, [''], '没有展开时不传邀请码')
+  assert.deepEqual(page.invited, [''], '没填就不传')
 
-  await page.element('show-invite').events.click()
   page.element('invite').value = ' abcd2345 '
   await page.element('email-sign-in').events.click()
   assert.deepEqual(page.invited, ['', 'abcd2345'], '填了邀请码就带上，且去掉首尾空格')
