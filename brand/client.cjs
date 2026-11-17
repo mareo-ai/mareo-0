@@ -1,5 +1,27 @@
 const React = require('react')
 
+/**
+ * This page is a `file://` document, so `navigator.clipboard` is not defined — the
+ * API requires a secure context. Every copy button has therefore failed 100% of the
+ * time, including DSH's own code-block button, which is why the problem showed up in
+ * two unrelated places.
+ *
+ * The preload exposes `__mareoClipboard`, which goes to Electron's clipboard in the
+ * main process. Routing the standard API onto it fixes the buttons without touching
+ * their code.
+ */
+;(function installClipboardShim() {
+  const bridge = globalThis.__mareoClipboard
+  if (bridge === undefined) return
+  const working = { writeText: (text) => bridge.writeText(text) }
+  if (navigator.clipboard && navigator.clipboard.writeText) return
+  try {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: working })
+  } catch {
+    // Some builds make `navigator` non-extensible; copyText's fallback still runs.
+  }
+})()
+
 function BrandMark({ size }) {
   return React.createElement("img", {
     src: logoUrl,
