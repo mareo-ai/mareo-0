@@ -147,3 +147,24 @@ for (const hasAbuseColumn of [false, true]) {
     }
   })
 }
+test('a column missing while the version already matches is restored on open', () => {
+  // The failure this guards against: a column added to `addUserColumns` without bumping
+  // SCHEMA_VERSION. The version check then skips the migration, the column never
+  // appears, and every request that reads it returns 500 on a service that looks
+  // healthy — which is exactly what happened on 2026-11-18.
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-missing-column-'))
+  const file = path.join(directory, 'gateway.db')
+  try {
+    const first = openDatabase(file)
+    assert.equal((first.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 13)
+    first.exec('ALTER TABLE users DROP COLUMN abuseSince')
+    first.close()
+
+    const reopened = openDatabase(file)
+    const columns = (reopened.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name)
+    assert.ok(columns.includes('abuseSince'), '开库时应当补回缺失的列')
+    reopened.close()
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
