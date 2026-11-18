@@ -331,3 +331,37 @@ test('an account on the no-allowance list starts each day with nothing', () => {
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a marked account gets no allowance and no grants, but may still pay', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-abuse-'))
+  const db = openDatabase(path.join(directory, 'gateway.db'))
+  const accountId = createTokenAccount(db, '标记测试')
+  try {
+    writeSetting(db, 'quota.mode', 'enforce')
+    db.prepare('UPDATE users SET abuseSince = ? WHERE id = ?').run('2026-11-18T00:00:00.000Z', accountId)
+
+    assert.equal(creditState(db, accountId, readSettings(db)).freeLimitMicro, 0, '标记的账号没有每日额度')
+    assert.equal(creditState(db, accountId, readSettings(db)).exhausted, true, '钱包为空时直接不能调用')
+
+    // Every form of credit from us is refused.
+    for (const source of ['promotion', 'invite', 'reward_ad'] as const) {
+      assert.throws(
+        () => grantCredit(db, { accountId, amountMicro: 5_000_000, source }),
+        /已被标记/,
+        `${source} 应被拒绝`,
+      )
+    }
+
+    // A top-up is the person's own money; it must still work.
+    grantCredit(db, { accountId, amountMicro: 10_000_000, source: 'purchase' })
+    assert.equal(creditState(db, accountId, readSettings(db)).walletMicro, 10_000_000)
+    assert.equal(creditState(db, accountId, readSettings(db)).exhausted, false, '充钱后可以继续用')
+
+    // Clearing the mark restores the allowance.
+    db.prepare('UPDATE users SET abuseSince = NULL WHERE id = ?').run(accountId)
+    assert.equal(creditState(db, accountId, readSettings(db)).freeLimitMicro, 2_000_000)
+  } finally {
+    db.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

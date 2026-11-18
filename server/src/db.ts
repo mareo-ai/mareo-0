@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   displayName TEXT NOT NULL,
   createdAt TEXT NOT NULL DEFAULT (datetime('now')),
-  inviteCode TEXT
+  inviteCode TEXT,
+  abuseSince TEXT
 );
 
 CREATE TABLE IF NOT EXISTS identities (
@@ -254,6 +255,10 @@ export function openDatabase(dbPath: string): GatewayDatabase {
 function addUserColumns(db: GatewayDatabase): void {
   const columns = (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((row) => row.name)
   if (!columns.includes('inviteCode')) db.exec('ALTER TABLE users ADD COLUMN inviteCode TEXT')
+  // Set when an account is marked as abuse: no daily allowance, and no credit from any
+  // future grant. Null means a normal account. The timestamp is kept rather than a flag
+  // so the reason and the moment stay visible.
+  if (!columns.includes('abuseSince')) db.exec('ALTER TABLE users ADD COLUMN abuseSince TEXT')
 }
 
 function addUsageColumns(db: GatewayDatabase): void {
@@ -290,6 +295,8 @@ function migrate(db: GatewayDatabase): void {
   const fresh = users === undefined
   if (fresh) {
     db.exec(SCHEMA)
+    addUserColumns(db)
+    addUsageColumns(db)
     return
   }
   const columns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[]

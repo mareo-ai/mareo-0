@@ -84,6 +84,16 @@ export function quotaVisible(settings: Settings, accountId: string): boolean {
   return settings.quotaMode === 'enforce' || settings.rewardAccounts.includes(accountId)
 }
 
+/**
+ * Whether an account has been marked for abuse. Such an account gets no daily
+ * allowance and no credit from any future grant — the mark outlives the specific
+ * campaign it was applied for.
+ */
+export function isAbusive(db: GatewayDatabase, accountId: string): boolean {
+  const row = db.prepare('SELECT abuseSince FROM users WHERE id = ?').get(accountId) as { abuseSince: string | null } | undefined
+  return row?.abuseSince != null && row.abuseSince !== ''
+}
+
 export function creditState(
   db: GatewayDatabase,
   accountId: string,
@@ -96,7 +106,7 @@ export function creditState(
   // An account can be cut off from the allowance entirely; the wallet is then its
   // only source. Used for accounts that farmed the signup credit across disposable
   // mailboxes: the account is kept, the subsidy stops.
-  const freeLimitMicro = settings.noAllowanceAccounts.has(accountId)
+  const freeLimitMicro = isAbusive(db, accountId) || settings.noAllowanceAccounts.has(accountId)
     ? 0
     : dailyAllowanceMicro(settings, lifetimeFreeUsedMicro(db, accountId, now))
   const freeRemainingMicro = Math.max(0, freeLimitMicro - freeUsedMicro)

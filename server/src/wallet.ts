@@ -110,6 +110,15 @@ export function grantCredit(
   if (!Number.isInteger(amountMicro) || amountMicro <= 0) {
     throw new Error(`额度金额需要是正整数微元，收到 ${amountMicro}`)
   }
+  // A marked account may still top up with its own money — refusing that would be
+  // punishing a person who pays — but it may never receive credit from us again, in
+  // this campaign or any future one.
+  if (source === 'promotion' || source === 'invite' || source === 'reward_ad') {
+    const row = db.prepare('SELECT abuseSince FROM users WHERE id = ?').get(accountId) as { abuseSince: string | null } | undefined
+    if (row?.abuseSince != null && row.abuseSince !== '') {
+      throw new Error('该账号已被标记，不能接收赠送')
+    }
+  }
   if (!CREDIT_SOURCES.includes(source)) {
     throw new Error(`未知的额度来源 ${source}；可用：${CREDIT_SOURCES.join(', ')}`)
   }
