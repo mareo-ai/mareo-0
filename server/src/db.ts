@@ -230,7 +230,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_txn
     ON users(inviteCode) WHERE inviteCode IS NOT NULL;
 `
 
-const SCHEMA_VERSION = 12
+const SCHEMA_VERSION = 13
 
 export function openDatabase(dbPath: string): GatewayDatabase {
   mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true })

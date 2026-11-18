@@ -6,6 +6,8 @@ import test from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { createTokenAccount, findTokenOwner, openDatabase, storeToken, type GatewayDatabase } from '../src/db.js'
 import { hashToken } from '../src/auth.js'
+import { creditState } from '../src/quota.js'
+import { readSettings } from '../src/settings.js'
 
 let directory: string
 let dbPath: string
@@ -55,7 +57,7 @@ test('migrates a legacy v1 database into accounts + identities', () => {
   db = openDatabase(dbPath)
 
   const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-  assert.equal(version.user_version, 12)
+  assert.equal(version.user_version, 13)
   const identities = (db.prepare('SELECT provider, subject FROM identities ORDER BY accountId').all() as {
     provider: string
     subject: string | null
@@ -90,7 +92,7 @@ for (const interrupted of [false, true]) {
       upgraded.close()
 
       upgraded = openDatabase(upgradePath)
-      assert.equal(upgraded.prepare('PRAGMA user_version').get()?.user_version, 12)
+      assert.equal(upgraded.prepare('PRAGMA user_version').get()?.user_version, 13)
       assert.equal(upgraded.prepare('SELECT inviteCode FROM users WHERE id = ?').get(accountId)?.inviteCode, null)
       assert.deepEqual(findTokenOwner(upgraded, hashToken('v11-secret')), { userId: accountId, displayName: 'Migration test' })
       assert.deepEqual(upgraded.prepare('SELECT * FROM usage').all(), usageBefore)
@@ -104,6 +106,42 @@ for (const interrupted of [false, true]) {
       upgraded = openDatabase(upgradePath)
       assert.equal(upgraded.prepare('SELECT inviteCode FROM users WHERE id = ?').get(accountId)?.inviteCode, 'ABCDEFGH')
       assert.deepEqual(upgraded.prepare('SELECT * FROM wallet_ledger').all(), ledgerBefore)
+    } finally {
+      if (upgraded.isOpen) upgraded.close()
+    }
+  })
+}
+
+for (const hasAbuseColumn of [false, true]) {
+  test(`upgrades v12 ${hasAbuseColumn ? 'with' : 'without'} the abuse column without changing existing records`, () => {
+    const upgradePath = path.join(directory, `v12-${hasAbuseColumn}.db`)
+    let upgraded = openDatabase(upgradePath)
+    try {
+      const accountId = createTokenAccount(upgraded, 'Existing account')
+      storeToken(upgraded, { userId: accountId, label: 'existing', tokenHash: hashToken('v12-secret') })
+      upgraded.prepare(`INSERT INTO usage (userId, ts, model, promptChars, completionChars, status, latencyMs, actualMicro, billableMicro)
+        VALUES (?, '2026-11-18T00:00:00Z', 'deepseek-flash', 1, 2, 200, 5, 100, 130)`).run(accountId)
+      upgraded.prepare(`INSERT INTO wallet_ledger (userId, type, amountMicro, source, balanceAfterMicro, createdAt)
+        VALUES (?, 'credit', 1000000, 'manual', 1000000, '2026-11-18T00:00:00Z')`).run(accountId)
+      const usageBefore = upgraded.prepare('SELECT * FROM usage').all()
+      const ledgerBefore = upgraded.prepare('SELECT * FROM wallet_ledger').all()
+      if (hasAbuseColumn) upgraded.prepare('UPDATE users SET abuseSince = ? WHERE id = ?').run('2026-11-17T00:00:00Z', accountId)
+      else upgraded.exec('ALTER TABLE users DROP COLUMN abuseSince')
+      upgraded.exec('PRAGMA user_version = 12')
+      upgraded.close()
+
+      upgraded = openDatabase(upgradePath)
+      assert.equal(upgraded.prepare('PRAGMA user_version').get()?.user_version, 13)
+      assert.equal(upgraded.prepare('SELECT abuseSince FROM users WHERE id = ?').get(accountId)?.abuseSince, hasAbuseColumn ? '2026-11-17T00:00:00Z' : null)
+      const credit = creditState(upgraded, accountId, readSettings(upgraded))
+      assert.equal(credit.walletMicro, 1000000)
+      if (hasAbuseColumn) assert.equal(credit.freeRemainingMicro, 0)
+      assert.deepEqual(findTokenOwner(upgraded, hashToken('v12-secret')), { userId: accountId, displayName: 'Existing account' })
+      assert.deepEqual(upgraded.prepare('SELECT * FROM usage').all(), usageBefore)
+      assert.deepEqual(upgraded.prepare('SELECT * FROM wallet_ledger').all(), ledgerBefore)
+      upgraded.close()
+      upgraded = openDatabase(upgradePath)
+      assert.equal(upgraded.prepare('SELECT abuseSince FROM users WHERE id = ?').get(accountId)?.abuseSince, hasAbuseColumn ? '2026-11-17T00:00:00Z' : null)
     } finally {
       if (upgraded.isOpen) upgraded.close()
     }
