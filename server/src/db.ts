@@ -230,7 +230,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_txn
     ON users(inviteCode) WHERE inviteCode IS NOT NULL;
 `
 
-const SCHEMA_VERSION = 12
+const SCHEMA_VERSION = 13
 
 export function openDatabase(dbPath: string): GatewayDatabase {
   mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true })
@@ -242,6 +242,12 @@ export function openDatabase(dbPath: string): GatewayDatabase {
   } else {
     db.exec(SCHEMA)
   }
+  // Belt and braces. A column added without bumping SCHEMA_VERSION leaves an
+  // existing database without it, and every request that reads it fails with
+  // `no such column` — a 500 on a healthy-looking service. These are idempotent, so
+  // running them unconditionally costs nothing and removes the failure mode.
+  addUserColumns(db)
+  addUsageColumns(db)
   return db
 }
 

@@ -55,7 +55,7 @@ test('migrates a legacy v1 database into accounts + identities', () => {
   db = openDatabase(dbPath)
 
   const version = db.prepare('PRAGMA user_version').get() as { user_version: number }
-  assert.equal(version.user_version, 12)
+  assert.equal(version.user_version, 13)
   const identities = (db.prepare('SELECT provider, subject FROM identities ORDER BY accountId').all() as {
     provider: string
     subject: string | null
@@ -90,7 +90,7 @@ for (const interrupted of [false, true]) {
       upgraded.close()
 
       upgraded = openDatabase(upgradePath)
-      assert.equal(upgraded.prepare('PRAGMA user_version').get()?.user_version, 12)
+      assert.equal(upgraded.prepare('PRAGMA user_version').get()?.user_version, 13)
       assert.equal(upgraded.prepare('SELECT inviteCode FROM users WHERE id = ?').get(accountId)?.inviteCode, null)
       assert.deepEqual(findTokenOwner(upgraded, hashToken('v11-secret')), { userId: accountId, displayName: 'Migration test' })
       assert.deepEqual(upgraded.prepare('SELECT * FROM usage').all(), usageBefore)
@@ -109,3 +109,25 @@ for (const interrupted of [false, true]) {
     }
   })
 }
+
+test('a column missing while the version already matches is restored on open', () => {
+  // The failure this guards against: a column added to `addUserColumns` without bumping
+  // SCHEMA_VERSION. The version check then skips the migration, the column never
+  // appears, and every request that reads it returns 500 on a service that looks
+  // healthy — which is exactly what happened on 2026-11-18.
+  const directory = mkdtempSync(path.join(tmpdir(), 'mareo-missing-column-'))
+  const file = path.join(directory, 'gateway.db')
+  try {
+    const first = openDatabase(file)
+    assert.equal((first.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 13)
+    first.exec('ALTER TABLE users DROP COLUMN abuseSince')
+    first.close()
+
+    const reopened = openDatabase(file)
+    const columns = (reopened.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name)
+    assert.ok(columns.includes('abuseSince'), '开库时应当补回缺失的列')
+    reopened.close()
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
