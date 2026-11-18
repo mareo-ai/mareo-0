@@ -493,6 +493,27 @@ async function handleSiteView(
   sendJson(response, 200, { ok: true })
 }
 
+/**
+ * How many accounts one address may create in a window.
+ *
+ * Disposable mailboxes made every other defence irrelevant: a new address costs
+ * cents, and each account brought a ¥10 credit plus a ¥2 daily allowance. The address
+ * is the one thing a script cannot change freely, so the limit is on it.
+ */
+const SIGNUP_LIMIT = 5
+const SIGNUP_WINDOW_MS = 12 * 60 * 60 * 1000
+
+export function signupsFrom(db: GatewayDatabase, address: string, now: Date): number {
+  const since = new Date(now.getTime() - SIGNUP_WINDOW_MS).toISOString()
+  return (db.prepare('SELECT COUNT(*) AS n FROM signup_ips WHERE ip = ? AND createdAt > ?').get(address, since) as { n: number }).n
+}
+
+export function recordSignup(db: GatewayDatabase, address: string, now: Date): void {
+  const cutoff = new Date(now.getTime() - SIGNUP_WINDOW_MS).toISOString()
+  db.prepare('DELETE FROM signup_ips WHERE createdAt <= ?').run(cutoff)
+  db.prepare('INSERT INTO signup_ips (ip, createdAt) VALUES (?, ?)').run(address, now.toISOString())
+}
+
 /** nginx in front of the gateway sets these; the gateway itself is loopback-only. */
 function clientAddress(request: IncomingMessage): string {
   const real = request.headers['x-real-ip']
@@ -559,6 +580,12 @@ async function handleEmailVerify(options: GatewayOptions, request: IncomingMessa
   // code would leave the inviter waiting for a reward that will never arrive.
   let inviteState: 'none' | 'recorded' | 'invalid' | 'existing-account' = 'none'
   if (!existed) {
+    const address = clientAddress(request)
+    if (signupsFrom(options.db, address, new Date()) >= SIGNUP_LIMIT) {
+      sendJson(response, 429, { error: 'too-many-signups' })
+      return
+    }
+    recordSignup(options.db, address, new Date())
     warnOnSignupBurst(options.db, email)
     // The allowance is ¥2 a day, which is a place to start, not enough to judge
     // the product. A new account gets one ¥10 credit so the first session can be

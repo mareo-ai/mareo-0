@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS session_titles (
 
 -- Website page views. Daily counters only: no IP, no user agent, no cookie and
 -- no per-visit row, so this table can never identify a visitor.
+-- Registration rate limiting. An address is recorded when an account is created, so
+-- one address cannot mint accounts without limit. Nothing else is stored, and rows
+-- older than the window are deleted as new ones are written.
+CREATE TABLE IF NOT EXISTS signup_ips (
+  ip TEXT NOT NULL,
+  createdAt TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS signup_ips_window ON signup_ips(ip, createdAt);
+
 CREATE TABLE IF NOT EXISTS site_views (
   day TEXT NOT NULL,
   path TEXT NOT NULL,
